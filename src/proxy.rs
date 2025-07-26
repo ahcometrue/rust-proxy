@@ -865,21 +865,21 @@ where
 
 
 
-fn load_certificates(cert_pem: &[u8]) -> Vec<Certificate> {
+fn load_certificates(cert_pem: &[u8]) -> Vec<rustls::Certificate> {
     let mut reader = BufReader::new(Cursor::new(cert_pem));
     rustls_pemfile::certs(&mut reader)
         .unwrap()
         .into_iter()
-        .map(Certificate)
+        .map(rustls::Certificate)
         .collect()
 }
 
-fn load_private_key(key_pem: &[u8]) -> PrivateKey {
+fn load_private_key(key_pem: &[u8]) -> rustls::PrivateKey {
     let mut reader = BufReader::new(Cursor::new(key_pem));
     let key = rustls_pemfile::pkcs8_private_keys(&mut reader)
         .unwrap()
         .into_iter()
         .next()
         .unwrap();
-    PrivateKey(key)
+    rustls::PrivateKey(key)
 }
