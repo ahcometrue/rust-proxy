@@ -166,39 +166,32 @@ impl Logger {
             
         // 替换域名中的特殊字符，确保文件名有效
         let safe_domain = host_only
-            .replace('.', "_")
-            .replace(':', "_")
-            .replace('/', "_")
-            .replace('\\', "_")
-            .replace('?', "_")
-            .replace('&', "_")
-            .replace('=', "_")
-            .replace('%', "_");
+            .replace(['.', ':', '/', '\\', '?', '&', '=', '%'], "_");
         
         // 使用默认格式
-        let filename = format!("domain_{}.log", safe_domain);
+        let filename = format!("domain_{safe_domain}.log");
             
         let filepath = Path::new(&self.log_dir).join(&filename);
         
-        log::debug!("Attempting to create domain log file: {:?}", filepath);
+        log::debug!("Attempting to create domain log file: {filepath:?}");
         log::debug!("Domain: {}", entry.domain);
-        log::debug!("Host only: {}", host_only);
-        log::debug!("Safe domain: {}", safe_domain);
-        log::debug!("Filename: {}", filename);
+        log::debug!("Host only: {host_only}");
+        log::debug!("Safe domain: {safe_domain}");
+        log::debug!("Filename: {filename}");
         
-        let log_entry = format!("{}, {}", Local::now().format("%Y-%m-%d %H:%M:%S"), entry.to_json());
+        let log_entry = format!("{}, {} {safe_domain}.log", Local::now().format("%Y-%m-%d %H:%M:%S"), entry.to_json());
         
         match OpenOptions::new()
             .create(true)
             .append(true)
             .open(&filepath) {
             Ok(mut file) => {
-                match writeln!(file, "{}", log_entry) {
-                    Ok(_) => log::debug!("Successfully wrote to domain log: {:?}", filepath),
-                    Err(e) => log::error!("Failed to write to domain log {:?}: {}", filepath, e),
+                match writeln!(file, "{log_entry}") {
+                    Ok(_) => log::debug!("Successfully wrote to domain log: {filepath:?}"),
+                    Err(e) => log::error!("Failed to write to domain log {filepath:?}: {e}"),
                 }
             }
-            Err(e) => log::error!("Failed to open domain log file {:?}: {}", filepath, e),
+            Err(e) => log::error!("Failed to open domain log file {filepath:?}: {e}"),
         }
         
         Ok(())

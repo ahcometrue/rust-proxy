@@ -58,11 +58,11 @@ impl ProxyServer {
         );
 
         let listener = TcpListener::bind(addr).await?;
-        log::info!("Proxy server listening on {}", addr);
+        log::info!("Proxy server listening on {addr}");
 
         loop {
             let (stream, peer_addr) = listener.accept().await?;
-            log::info!("New connection from {}", peer_addr);
+            log::info!("New connection from {peer_addr}");
 
             let config = Arc::clone(&self.config);
             let cert_manager = Arc::clone(&self.cert_manager);
@@ -70,7 +70,7 @@ impl ProxyServer {
 
             tokio::spawn(async move {
                 if let Err(e) = handle_connection(stream, config, cert_manager, logger).await {
-                    log::error!("Connection error: {}", e);
+                    log::error!("Connection error: {e}");
                 }
             });
         }
@@ -82,10 +82,10 @@ impl ProxyServer {
 fn log_request_start(method: &str, path: &str, host: Option<&str>) {
     log::info!("🔍 REQUEST START ========================================");
     log::info!("⏰ Timestamp: {:?}", SystemTime::now());
-    log::info!("📝 Method: {}", method);
-    log::info!("🔗 Path: {}", path);
+    log::info!("📝 Method: {method}");
+    log::info!("🔗 Path: {path}");
     if let Some(host) = host {
-        log::info!("🌐 Host: {}", host);
+        log::info!("🌐 Host: {host}");
     }
 }
 
@@ -93,9 +93,9 @@ fn log_request_start(method: &str, path: &str, host: Option<&str>) {
 fn log_response_summary(bytes: usize, status: Option<&str>) {
     log::info!("📊 RESPONSE SUMMARY ======================================");
     log::info!("⏰ Timestamp: {:?}", SystemTime::now());
-    log::info!("📦 Response size: {} bytes", bytes);
+    log::info!("📦 Response size: {bytes} bytes");
     if let Some(status) = status {
-        log::info!("🔢 Status: {}", status);
+        log::info!("🔢 Status: {status}");
     }
     log::info!("✅ REQUEST COMPLETE =====================================");
 }
@@ -153,7 +153,7 @@ async fn handle_connection(
     // 检查HTTP请求行是否有效
     match parts.len() {
         len if len < 3 => {
-            log::warn!("Invalid HTTP request: {}", first_line);
+            log::warn!("Invalid HTTP request: {first_line}");
             return Ok(());
         },
         _ => (), // 有效请求行
@@ -174,7 +174,7 @@ async fn handle_connection(
         if line.is_empty() {
             break;
         }
-        log::info!("  {}", line);
+        log::info!("  {line}");
     }
     
     // 记录完整的原始请求
@@ -209,7 +209,7 @@ async fn handle_https_connect(
 
     log::info!("🔒 HTTPS CONNECT =========================================");
     log::info!("⏰ Timestamp: {:?}", SystemTime::now());
-    log::info!("🎯 Target: {}:{}", host, port);
+    log::info!("🎯 Target: {host}:{port}");
     log::info!("🔍 Intercept: {}", config.should_intercept(&host, port));
 
     // 记录CONNECT请求
@@ -229,19 +229,19 @@ async fn handle_https_connect(
         client_stream.write_all(response.as_bytes()).await?;
 
         // 建立直接隧道
-        log::info!("Connecting to target server: {}:{}", host, port);
-        let server_stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
+        log::info!("Connecting to target server: {host}:{port}");
+        let server_stream = TcpStream::connect(format!("{host}:{port}")).await?;
         log::info!("Tunnel established successfully");
         
         let (client_bytes, server_bytes) = tunnel_connection_with_logging(client_stream, server_stream).await?;
         log::info!("=== DIRECT TUNNEL CLOSED ===");
-        log::info!("Bytes transferred: client={}, server={}", client_bytes, server_bytes);
+        log::info!("Bytes transferred: client={client_bytes}, server={server_bytes}");
         
         // 使用新的DomainLogger记录隧道模式日志
         let log_entry = DomainLogger::create_log_entry(
             host.clone(),
             "CONNECT".to_string(),
-            format!("{}:{}", host, port),
+            format!("{host}:{port}"),
             HashMap::new(),
             HashMap::new(),
             200,
@@ -258,7 +258,7 @@ async fn handle_https_connect(
     }
 
     log::info!("=== INTERCEPT MODE ===");
-    log::info!("Intercepting HTTPS connection to {}:{}", host, port);
+    log::info!("Intercepting HTTPS connection to {host}:{port}");
     
     // 发送200 Connection Established
     let response = "HTTP/1.1 200 Connection Established\r\n\r\n";
@@ -266,7 +266,7 @@ async fn handle_https_connect(
 
     // 生成站点证书
     let (cert_pem, key_pem) = cert_manager.generate_site_cert(&host)?;
-    log::debug!("Generated site certificate for {}", host);
+    log::debug!("Generated site certificate for {host}");
 
     // 创建TLS配置
     let cert_chain = load_certificates(&cert_pem);
@@ -281,11 +281,11 @@ async fn handle_https_connect(
     let acceptor = TlsAcceptor::from(Arc::new(tls_config));
     let mut tls_stream = match acceptor.accept(client_stream).await {
         Ok(stream) => {
-            log::info!("TLS handshake successful for {}", host);
+            log::info!("TLS handshake successful for {host}");
             stream
         },
         Err(e) => {
-            log::error!("TLS handshake failed for {}: {}", host, e);
+            log::error!("TLS handshake failed for {host}: {e}");
             return Err(e.into());
         }
     };
@@ -327,7 +327,7 @@ async fn handle_https_connect(
     let first_line = lines[0];
     let parts: Vec<&str> = first_line.split_whitespace().collect();
     if parts.len() < 3 {
-        log::warn!("Invalid HTTPS request: {}", first_line);
+        log::warn!("Invalid HTTPS request: {first_line}");
         return Ok(());
     }
     
@@ -336,9 +336,9 @@ async fn handle_https_connect(
     
     log::info!("🌐 HTTPS REQUEST ==========================================");
     log::info!("⏰ Timestamp: {:?}", SystemTime::now());
-    log::info!("📝 Method: {}", method);
-    log::info!("🔗 Path: {}", path);
-    log::info!("🌐 Host: {}:{}", host, port);
+    log::info!("📝 Method: {method}");
+    log::info!("🔗 Path: {path}");
+    log::info!("🌐 Host: {host}:{port}");
     
     // 解析请求头和请求体
     let mut headers = HashMap::new();
@@ -365,7 +365,7 @@ async fn handle_https_connect(
         let query = &path[query_start + 1..];
         query.split('&')
             .filter_map(|pair| pair.split_once('='))
-            .map(|(k, v)| format!("{}={}", k, v))
+            .map(|(k, v)| format!("{k}={v}"))
             .collect::<Vec<_>>()
             .join("&")
     } else {
@@ -382,13 +382,13 @@ async fn handle_https_connect(
     // 不再提前记录日志，将在获取完整响应信息后记录
     
     // 构建新的HTTP请求
-    let mut new_request = format!("{} {} HTTP/1.1\r\n", method, path);
-    new_request.push_str(&format!("Host: {}:{}\r\n", host, port));
+    let mut new_request = format!("{method} {path} HTTP/1.1\r\n");
+    new_request.push_str(&format!("Host: {host}:{port}\r\n"));
     
     // 保留原始头部
     for (key, value) in &headers {
         if key != "host" {
-            new_request.push_str(&format!("{}: {}\r\n", key, value));
+            new_request.push_str(&format!("{key}: {value}\r\n"));
         }
     }
     
@@ -408,8 +408,8 @@ async fn handle_https_connect(
     }
     
     // 使用HTTPS连接器建立到目标服务器的连接
-    log::info!("Connecting to HTTPS server: {}:{}", host, port);
-    let server_stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
+    log::info!("Connecting to HTTPS server: {host}:{port}");
+    let server_stream = TcpStream::connect(format!("{host}:{port}")).await?;
     
     // 建立TLS连接
     let connector = tokio_native_tls::TlsConnector::from(
@@ -499,7 +499,7 @@ async fn handle_https_connect(
     let log_entry = DomainLogger::create_log_entry(
         host.clone(),
         method.to_string(),
-        format!("https://{}:{}{}", host, port, path),
+        format!("https://{host}:{port}{path}"),
         request_headers,
         response_headers_map,
         response_status,
@@ -531,7 +531,7 @@ async fn handle_http_request(
     let parts: Vec<&str> = first_line.split_whitespace().collect();
     
     if parts.len() < 3 {
-        log::warn!("Invalid HTTP request: {}", first_line);
+        log::warn!("Invalid HTTP request: {first_line}");
         return Ok(());
     }
 
@@ -580,11 +580,11 @@ async fn handle_http_request(
 
     log::info!("🌐 HTTP REQUEST ==========================================");
     log::info!("⏰ Timestamp: {:?}", SystemTime::now());
-    log::info!("📝 Method: {}", method);
-    log::info!("🔗 Path: {}", path);
-    log::info!("🌐 Host: {}:{}", host, port);
+    log::info!("📝 Method: {method}");
+    log::info!("🔗 Path: {path}");
+    log::info!("🌐 Host: {host}:{port}");
     log::info!("📋 Full Request:");
-    log::info!("{}", request);
+    log::info!("{request}");
 
     // 使用新的DomainLogger记录请求日志（异步，不阻塞主流程）
     
@@ -599,7 +599,7 @@ async fn handle_http_request(
         let query = &path[query_start + 1..];
         query.split('&')
             .filter_map(|pair| pair.split_once('='))
-            .map(|(k, v)| format!("{}={}", k, v))
+            .map(|(k, v)| format!("{k}={v}"))
             .collect::<Vec<_>>()
             .join("&")
     } else {
@@ -613,11 +613,11 @@ async fn handle_http_request(
     };
 
     if config.should_intercept(&host, port) {
-        log::info!("Intercepting HTTP request to {}:{}{}", host, port, path);
+        log::info!("Intercepting HTTP request to {host}:{port}{path}");
     }
 
     // 构建新的HTTP请求，保持原始请求头
-    let mut new_request = format!("{} {} HTTP/1.1\r\n", method, path);
+    let mut new_request = format!("{method} {path} HTTP/1.1\r\n");
     
     // 计算请求总大小
     let request_size = new_request.len() + request_body.len();
@@ -631,13 +631,13 @@ async fn handle_http_request(
         if let Some(colon_pos) = line.find(':') {
             let key = line[..colon_pos].trim().to_lowercase();
             let value = line[colon_pos + 1..].trim().to_string();
-            log::info!("📋 Request Header: {}: {}", key, value);
+            log::info!("📋 Request Header: {key}: {value}");
             headers_map.insert(key, value);
         }
     }
     
     // 设置Host头
-    new_request.push_str(&format!("Host: {}:{}\r\n", host, port));
+    new_request.push_str(&format!("Host: {host}:{port}\r\n"));
     
     // 添加或保留其他必要头部
     if !headers_map.contains_key("user-agent") {
@@ -663,8 +663,8 @@ async fn handle_http_request(
     new_request.push_str("\r\n");
 
     // 连接到目标服务器
-    log::info!("Connecting to target server: {}:{}", host, port);
-    let mut server_stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
+    log::info!("Connecting to target server: {host}:{port}");
+    let mut server_stream = TcpStream::connect(format!("{host}:{port}")).await?;
     
     // 转发请求
     log::info!("Forwarding request to server...");
@@ -760,7 +760,7 @@ async fn handle_http_request(
     };
     
     let _status = status_line.split_whitespace().nth(1).unwrap_or("Unknown");
-    log_response_summary(_total_bytes, Some(&_status));
+    log_response_summary(_total_bytes, Some(_status));
     log::info!("Forwarding response to client...");
     log::info!("✅ HTTP REQUEST COMPLETE =====================================");
 
@@ -773,7 +773,7 @@ async fn handle_http_request(
     let log_entry = DomainLogger::create_log_entry(
         host.clone(),
         method.to_string(),
-        format!("http://{}:{}{}", host, port, path),
+        format!("http://{host}:{port}{path}"),
         request_headers,
         response_headers_map,
         response_status.unwrap_or(0),

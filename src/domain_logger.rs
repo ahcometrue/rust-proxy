@@ -83,7 +83,7 @@ impl DomainLogger {
         // 确保日志目录存在
         let log_dir = &config.logging.log_dir;
         if let Err(e) = fs::create_dir_all(log_dir) {
-            eprintln!("Failed to create log directory {}: {}", log_dir, e);
+            eprintln!("Failed to create log directory {log_dir}: {e}");
             return;
         }
         
@@ -115,7 +115,7 @@ impl DomainLogger {
         );
 
         // 同时打印到控制台
-        println!("{}", log_line);
+        println!("{log_line}");
         
         // 写入到域名对应的日志文件
         if let Ok(mut file) = OpenOptions::new()
@@ -123,7 +123,7 @@ impl DomainLogger {
             .append(true)
             .open(&log_file)
         {
-            let _ = writeln!(file, "{}", log_line);
+            let _ = writeln!(file, "{log_line}");
             
             // 写入详细信息
             let _ = writeln!(file, "  Request Headers: {:?}", entry.request_headers);
@@ -174,7 +174,7 @@ impl DomainLogger {
         match content.is_empty() {
             true => (), // 内容为空时不写入
             false => {
-                let _ = writeln!(file, "  {}: {}", label, content);
+                let _ = writeln!(file, "  {label}: {content}");
             }
         }
     }
@@ -256,5 +256,166 @@ impl DomainLogger {
             url_params: String::new(),
             error,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    fn create_test_config(log_dir: &str) -> Config {
+        Config {
+            proxy: crate::config::ProxyConfig {
+                host: "127.0.0.1".to_string(),
+                port: 8888,
+            },
+            target: crate::config::TargetConfig {
+                domains: vec!["*".to_string()],
+                ports: vec![0],
+            },
+            certificates: crate::config::CertificatesConfig {
+                ca_cert: "certs/ca.crt".to_string(),
+                ca_key: "certs/ca.key".to_string(),
+            },
+            logging: crate::config::LoggingConfig {
+                level: "debug".to_string(),
+                output: "file".to_string(),
+                log_dir: log_dir.to_string(),
+                program_log: "proxy.log".to_string(),
+                domain_logs: crate::config::DomainLogsConfig {
+                    enabled: true,
+                    format: "domain_{domain}_{date}.log".to_string(),
+                    request_body_limit: 1024,
+                    response_body_limit: 1024,
+                },
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_domain_logger() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_dir = temp_dir.path().to_str().unwrap().to_string();
+        
+        let config = Arc::new(create_test_config(&log_dir));
+        let logger = DomainLogger::new(config);
+        
+        assert!(!logger.sender.is_closed());
+    }
+
+    #[tokio::test]
+    async fn test_create_log_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_dir = temp_dir.path().to_str().unwrap().to_string();
+        
+        let config = Arc::new(create_test_config(&log_dir));
+        let logger = DomainLogger::new(config);
+        
+        let mut request_headers = HashMap::new();
+        request_headers.insert("User-Agent".to_string(), "test-agent".to_string());
+        request_headers.insert("Content-Type".to_string(), "application/json".to_string());
+        
+        let mut response_headers = HashMap::new();
+        response_headers.insert("Content-Type".to_string(), "application/json".to_string());
+        response_headers.insert("Server".to_string(), "test-server".to_string());
+        
+        let log_entry = DomainLogger::create_log_entry(
+            "example.com".to_string(),
+            "GET".to_string(),
+            "/test".to_string(),
+            request_headers.clone(),
+            response_headers.clone(),
+            200,
+            "test request body".to_string(),
+            "test response body".to_string(),
+            "param1=value1&param2=value2".to_string(),
+            100,
+            200,
+            false,
+            None,
+        );
+        
+        logger.log_request(log_entry.clone());
+        
+        // 验证日志条目内容
+        assert_eq!(log_entry.host, "example.com");
+        assert_eq!(log_entry.method, "GET");
+        assert_eq!(log_entry.path, "/test");
+        assert_eq!(log_entry.status_code, 200);
+        assert_eq!(log_entry.request_body, "test request body");
+        assert_eq!(log_entry.response_body, "test response body");
+        assert_eq!(log_entry.url_params, "param1=value1&param2=value2");
+        assert_eq!(log_entry.error, None);
+        assert_eq!(log_entry.request_headers, request_headers);
+        assert_eq!(log_entry.response_headers, response_headers);
+    }
+
+    #[test]
+    fn test_create_tunnel_log_entry() {
+        let log_entry = DomainLogger::create_tunnel_log_entry(
+            "example.com".to_string(),
+            100,
+            200,
+            Some("test error".to_string()),
+        );
+        
+        assert_eq!(log_entry.host, "example.com");
+        assert_eq!(log_entry.method, "CONNECT");
+        assert_eq!(log_entry.path, "TUNNEL");
+        assert_eq!(log_entry.status_code, 200);
+        assert_eq!(log_entry.request_body, "");
+        assert_eq!(log_entry.response_body, "");
+        assert_eq!(log_entry.url_params, "");
+        assert_eq!(log_entry.error, Some("test error".to_string()));
+        assert!(log_entry.request_headers.is_empty());
+        assert!(log_entry.response_headers.is_empty());
+    }
+
+    #[test]
+    fn test_process_body_content_helper() {
+        // 测试不记录情况 (limit = 0)
+        assert_eq!(DomainLogger::process_body_content_helper("test body", 0), "");
+        
+        // 测试完整记录情况 (limit = -1)
+        assert_eq!(DomainLogger::process_body_content_helper("test body", -1), "test body");
+        
+        // 测试正常截断情况
+        assert_eq!(
+            DomainLogger::process_body_content_helper("this is a long body content", 10),
+            "this is a ... (truncated)"
+        );
+        
+        // 测试不需要截断的情况
+        assert_eq!(
+            DomainLogger::process_body_content_helper("short", 10),
+            "short"
+        );
+    }
+
+    #[test]
+    fn test_write_body_content_helper() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_file = temp_dir.path().join("test.log");
+        
+        // 测试写入非空内容
+        {
+            let mut file = std::fs::File::create(&log_file).unwrap();
+            DomainLogger::write_body_content_helper(&mut file, "Test Label", "test content");
+        }
+        
+        let content = std::fs::read_to_string(&log_file).unwrap();
+        assert!(content.contains("Test Label: test content"));
+        
+        // 测试写入空内容（应该不写入任何内容）
+        std::fs::remove_file(&log_file).unwrap(); // 先清空文件
+        {
+            let mut file = std::fs::File::create(&log_file).unwrap();
+            DomainLogger::write_body_content_helper(&mut file, "Test Label", "");
+        }
+        
+        let content = std::fs::read_to_string(&log_file).unwrap();
+        assert!(content.is_empty());
     }
 }

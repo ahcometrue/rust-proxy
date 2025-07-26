@@ -238,3 +238,95 @@ impl CertManager {
         Ok(Certificate::from_params(params)?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_generate_ca_cert() {
+        let result = CertManager::generate_ca_cert();
+        assert!(result.is_ok());
+        
+        let (cert, key) = result.unwrap();
+        assert!(!cert.0.is_empty());
+        assert!(!key.0.is_empty());
+    }
+
+    #[test]
+    fn test_cert_manager_new_and_load() {
+        // 创建临时目录和文件路径
+        let temp_dir = tempfile::tempdir().unwrap();
+        let ca_cert_path = temp_dir.path().join("ca.crt");
+        let ca_key_path = temp_dir.path().join("ca.key");
+        
+        let ca_cert_str = ca_cert_path.to_str().unwrap();
+        let ca_key_str = ca_key_path.to_str().unwrap();
+        
+        // 第一次创建 CertManager（生成新证书）
+        let cert_manager = CertManager::new(ca_cert_str, ca_key_str);
+        assert!(cert_manager.is_ok());
+        
+        // 验证证书文件已创建
+        assert!(ca_cert_path.exists());
+        assert!(ca_key_path.exists());
+        
+        // 第二次创建 CertManager（从文件加载）
+        let cert_manager2 = CertManager::new(ca_cert_str, ca_key_str);
+        assert!(cert_manager2.is_ok());
+    }
+
+    #[test]
+    fn test_generate_site_cert() {
+        let result = CertManager::generate_ca_cert();
+        assert!(result.is_ok());
+        
+        let (_, ca_key) = result.unwrap();
+        let cert_manager = CertManager { ca_key };
+        
+        let site_cert_result = cert_manager.generate_site_cert("example.com");
+        assert!(site_cert_result.is_ok());
+        
+        let (cert_pem, key_pem) = site_cert_result.unwrap();
+        assert!(!cert_pem.is_empty());
+        assert!(!key_pem.is_empty());
+        
+        // 验证 PEM 格式
+        let cert_pem_str = String::from_utf8(cert_pem).unwrap();
+        let key_pem_str = String::from_utf8(key_pem).unwrap();
+        
+        assert!(cert_pem_str.starts_with("-----BEGIN CERTIFICATE-----"));
+        assert!(key_pem_str.starts_with("-----BEGIN PRIVATE KEY-----"));
+    }
+
+    #[test]
+    fn test_save_and_load_certificates() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let ca_cert_path = temp_dir.path().join("ca.crt");
+        let ca_key_path = temp_dir.path().join("ca.key");
+        
+        // 生成测试证书
+        let (ca_cert, ca_key) = CertManager::generate_ca_cert().unwrap();
+        
+        // 保存证书
+        let save_result = CertManager::save_certificates(
+            &ca_cert_path,
+            &ca_key_path,
+            &ca_cert,
+            &ca_key,
+        );
+        assert!(save_result.is_ok());
+        
+        // 验证文件存在
+        assert!(ca_cert_path.exists());
+        assert!(ca_key_path.exists());
+        
+        // 验证文件内容
+        let cert_content = fs::read_to_string(&ca_cert_path).unwrap();
+        let key_content = fs::read_to_string(&ca_key_path).unwrap();
+        
+        assert!(cert_content.contains("-----BEGIN CERTIFICATE-----"));
+        assert!(key_content.contains("-----BEGIN PRIVATE KEY-----"));
+    }
+}

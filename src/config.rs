@@ -170,3 +170,186 @@ where
 
     deserializer.deserialize_seq(PortsVisitor)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_from_file() {
+        let config_content = r#"{
+            "proxy": {
+                "host": "127.0.0.1",
+                "port": 8888
+            },
+            "target": {
+                "domains": ["example.com"],
+                "ports": [80, 443]
+            },
+            "certificates": {
+                "ca_cert": "certs/ca.crt",
+                "ca_key": "certs/ca.key"
+            },
+            "logging": {
+                "level": "debug",
+                "output": "file",
+                "log_dir": "logs",
+                "program_log": "proxy.log",
+                "domain_logs": {
+                    "enabled": true,
+                    "format": "domain_{domain}_{date}.log",
+                    "request_body_limit": 1024,
+                    "response_body_limit": 1024
+                }
+            }
+        }"#;
+        
+        std::fs::write("test_config_file.json", config_content).unwrap();
+        let config = Config::from_file("test_config_file.json").expect("Failed to load config");
+        
+        assert_eq!(config.proxy.host, "127.0.0.1");
+        assert_eq!(config.proxy.port, 8888);
+        assert_eq!(config.target.domains, vec!["example.com"]);
+        assert_eq!(config.target.ports, vec![80, 443]);
+        assert_eq!(config.certificates.ca_cert, "certs/ca.crt");
+        assert_eq!(config.certificates.ca_key, "certs/ca.key");
+        assert_eq!(config.logging.level, "debug");
+        assert!(config.logging.domain_logs.enabled);
+        assert_eq!(config.logging.domain_logs.request_body_limit, 1024);
+        
+        std::fs::remove_file("test_config_file.json").unwrap();
+    }
+    
+    #[test]
+    fn test_should_intercept_exact_match() {
+        let config = Config {
+            proxy: ProxyConfig {
+                host: "127.0.0.1".to_string(),
+                port: 8888,
+            },
+            target: TargetConfig {
+                domains: vec!["example.com".to_string()],
+                ports: vec![80, 443],
+            },
+            certificates: CertificatesConfig {
+                ca_cert: "certs/ca.crt".to_string(),
+                ca_key: "certs/ca.key".to_string(),
+            },
+            logging: LoggingConfig {
+                level: "debug".to_string(),
+                output: "file".to_string(),
+                log_dir: "logs".to_string(),
+                program_log: "proxy.log".to_string(),
+                domain_logs: DomainLogsConfig {
+                    enabled: true,
+                    format: "domain_{domain}_{date}.log".to_string(),
+                    request_body_limit: 1024,
+                    response_body_limit: 1024,
+                },
+            },
+        };
+        
+        // 测试精确匹配
+        assert!(config.should_intercept("example.com", 80));
+        assert!(config.should_intercept("example.com", 443));
+        
+        // 测试不匹配的情况
+        assert!(!config.should_intercept("other.com", 80));
+        assert!(!config.should_intercept("example.com", 8080));
+    }
+    
+    #[test]
+    fn test_should_intercept_wildcard_domains() {
+        let config = Config {
+            proxy: ProxyConfig {
+                host: "127.0.0.1".to_string(),
+                port: 8888,
+            },
+            target: TargetConfig {
+                domains: vec!["*".to_string()],
+                ports: vec![80, 443],
+            },
+            certificates: CertificatesConfig {
+                ca_cert: "certs/ca.crt".to_string(),
+                ca_key: "certs/ca.key".to_string(),
+            },
+            logging: LoggingConfig {
+                level: "debug".to_string(),
+                output: "file".to_string(),
+                log_dir: "logs".to_string(),
+                program_log: "proxy.log".to_string(),
+                domain_logs: DomainLogsConfig {
+                    enabled: true,
+                    format: "domain_{domain}_{date}.log".to_string(),
+                    request_body_limit: 1024,
+                    response_body_limit: 1024,
+                },
+            },
+        };
+        
+        // 测试通配符域名匹配
+        assert!(config.should_intercept("example.com", 80));
+        assert!(config.should_intercept("test.com", 443));
+        assert!(config.should_intercept("subdomain.example.com", 80));
+        
+        // 测试端口不匹配的情况
+        assert!(!config.should_intercept("example.com", 8080));
+    }
+    
+    #[test]
+    fn test_should_intercept_wildcard_ports() {
+        let config = Config {
+            proxy: ProxyConfig {
+                host: "127.0.0.1".to_string(),
+                port: 8888,
+            },
+            target: TargetConfig {
+                domains: vec!["example.com".to_string()],
+                ports: vec![0], // 0 表示通配符
+            },
+            certificates: CertificatesConfig {
+                ca_cert: "certs/ca.crt".to_string(),
+                ca_key: "certs/ca.key".to_string(),
+            },
+            logging: LoggingConfig {
+                level: "debug".to_string(),
+                output: "file".to_string(),
+                log_dir: "logs".to_string(),
+                program_log: "proxy.log".to_string(),
+                domain_logs: DomainLogsConfig {
+                    enabled: true,
+                    format: "domain_{domain}_{date}.log".to_string(),
+                    request_body_limit: 1024,
+                    response_body_limit: 1024,
+                },
+            },
+        };
+        
+        // 测试通配符端口匹配
+        assert!(config.should_intercept("example.com", 80));
+        assert!(config.should_intercept("example.com", 443));
+        assert!(config.should_intercept("example.com", 8080));
+        
+        // 测试域名不匹配的情况
+        assert!(!config.should_intercept("other.com", 80));
+    }
+    
+    #[test]
+    fn test_deserialize_ports() {
+        let json = r#"{"domains": ["example.com"], "ports": [80, 443, "*"]}"#;
+        let target: TargetConfig = serde_json::from_str(json).expect("Failed to deserialize ports");
+        
+        // 检查普通端口
+        assert!(target.ports.contains(&80));
+        assert!(target.ports.contains(&443));
+        
+        // 检查通配符端口（转换为0）
+        assert!(target.ports.contains(&0));
+    }
+    
+    #[test]
+    fn test_default_limits() {
+        assert_eq!(default_request_body_limit(), 1024);
+        assert_eq!(default_response_body_limit(), 1024);
+    }
+}
