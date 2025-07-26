@@ -28,6 +28,8 @@ pub struct LogEntry {
     pub url_params: String,
     /// 错误信息
     pub error: Option<String>,
+    /// 处理耗时（毫秒）
+    pub duration_ms: u128,
 }
 
 /// 域名日志记录器
@@ -102,12 +104,13 @@ impl DomainLogger {
         );
 
         let log_line = format!(
-            "[{}] {} {} {} - Status: {} - Req: {} bytes - Resp: {} bytes - Params: {} - Error: {:?}",
+            "[{}] {} {} {} - Status: {} - Duration: {}ms - Req: {} bytes - Resp: {} bytes - Params: {} - Error: {:?}",
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             entry.host,
             entry.method,
             entry.path,
             entry.status_code,
+            entry.duration_ms,
             entry.request_body.len(),
             entry.response_body.len(),
             entry.url_params,
@@ -191,6 +194,7 @@ impl DomainLogger {
     /// * `request_body` - 请求体
     /// * `response_body` - 响应体
     /// * `url_params` - URL参数
+    /// * `duration_ms` - 处理耗时（毫秒）
     /// * `bytes_sent` - 发送字节数
     /// * `bytes_received` - 接收字节数
     /// * `is_tunnel` - 是否为隧道模式
@@ -209,6 +213,7 @@ impl DomainLogger {
         request_body: String,
         response_body: String,
         url_params: String,
+        duration_ms: u128,
         _bytes_sent: usize,
         _bytes_received: usize,
         _is_tunnel: bool,
@@ -225,6 +230,7 @@ impl DomainLogger {
             response_body,
             url_params,
             error,
+            duration_ms,
         }
     }
 
@@ -232,6 +238,7 @@ impl DomainLogger {
     /// 
     /// # 参数
     /// * `host` - 主机名
+    /// * `duration_ms` - 处理耗时（毫秒）
     /// * `bytes_sent` - 发送字节数
     /// * `bytes_received` - 接收字节数
     /// * `error` - 错误信息
@@ -240,6 +247,7 @@ impl DomainLogger {
     /// 返回构建的LogEntry实例
     pub fn create_tunnel_log_entry(
         host: String,
+        duration_ms: u128,
         _bytes_sent: usize,
         _bytes_received: usize,
         error: Option<String>,
@@ -255,6 +263,7 @@ impl DomainLogger {
             response_body: String::new(),
             url_params: String::new(),
             error,
+            duration_ms,
         }
     }
 }
@@ -331,6 +340,7 @@ mod tests {
             "test request body".to_string(),
             "test response body".to_string(),
             "param1=value1&param2=value2".to_string(),
+            150, // duration_ms
             100,
             200,
             false,
@@ -350,12 +360,14 @@ mod tests {
         assert_eq!(log_entry.error, None);
         assert_eq!(log_entry.request_headers, request_headers);
         assert_eq!(log_entry.response_headers, response_headers);
+        assert_eq!(log_entry.duration_ms, 150);
     }
 
     #[test]
     fn test_create_tunnel_log_entry() {
         let log_entry = DomainLogger::create_tunnel_log_entry(
             "example.com".to_string(),
+            200, // duration_ms
             100,
             200,
             Some("test error".to_string()),
@@ -371,6 +383,7 @@ mod tests {
         assert_eq!(log_entry.error, Some("test error".to_string()));
         assert!(log_entry.request_headers.is_empty());
         assert!(log_entry.response_headers.is_empty());
+        assert_eq!(log_entry.duration_ms, 200);
     }
 
     #[test]

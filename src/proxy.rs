@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{SystemTime, Instant};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -203,6 +203,7 @@ async fn handle_https_connect(
     cert_manager: Arc<CertManager>,
     logger: Arc<DomainLogger>,
 ) -> Result<()> {
+    let start_time = Instant::now();
     let parts: Vec<&str> = path.split(':').collect();
     let host = parts[0].to_string();
     let port = parts.get(1).unwrap_or(&"443").parse::<u16>().unwrap_or(443);
@@ -213,8 +214,10 @@ async fn handle_https_connect(
     log::info!("🔍 Intercept: {}", config.should_intercept(&host, port));
 
     // 记录CONNECT请求
+    let duration_ms = start_time.elapsed().as_millis();
     let log_entry = DomainLogger::create_tunnel_log_entry(
         host.clone(),
+        duration_ms,
         0,
         0,
         None,
@@ -234,6 +237,7 @@ async fn handle_https_connect(
         log::info!("Tunnel established successfully");
         
         let (client_bytes, server_bytes) = tunnel_connection_with_logging(client_stream, server_stream).await?;
+        let duration_ms = start_time.elapsed().as_millis();
         log::info!("=== DIRECT TUNNEL CLOSED ===");
         log::info!("Bytes transferred: client={client_bytes}, server={server_bytes}");
         
@@ -248,6 +252,7 @@ async fn handle_https_connect(
             String::new(),
             String::new(),
             String::new(),
+            duration_ms,
             client_bytes as usize,
             server_bytes as usize,
             true, // 标记为隧道模式
@@ -459,7 +464,8 @@ async fn handle_https_connect(
         response_buffer.extend_from_slice(&buffer[..bytes_read]);
     }
     
-    log::info!("✅ HTTPS REQUEST COMPLETE - {} bytes transferred", response_buffer.len());
+    let duration_ms = start_time.elapsed().as_millis();
+    log::info!("✅ HTTPS REQUEST COMPLETE - {} bytes transferred - Duration: {}ms", response_buffer.len(), duration_ms);
     
     // 解析响应头和状态码用于日志记录
     let response_str = String::from_utf8_lossy(&response_buffer);
@@ -506,8 +512,9 @@ async fn handle_https_connect(
         request_body,
         response_body_str,
         url_params,
+        duration_ms,  // 注意：参数位置调整为 duration_ms
         new_request.len(),
-        response_buffer.len(),  // 使用response_buffer.len()替代total_bytes
+        response_buffer.len(),
         false,
         None,
     );
@@ -522,6 +529,7 @@ async fn handle_http_request(
     config: Arc<Config>,
     logger: Arc<DomainLogger>,
 ) -> Result<()> {
+    let start_time = Instant::now();
     let lines: Vec<&str> = request.lines().collect();
     if lines.is_empty() {
         return Ok(());
@@ -760,8 +768,9 @@ async fn handle_http_request(
     };
     
     let _status = status_line.split_whitespace().nth(1).unwrap_or("Unknown");
+    let duration_ms = start_time.elapsed().as_millis();
     log_response_summary(_total_bytes, Some(_status));
-    log::info!("Forwarding response to client...");
+    log::info!("Forwarding response to client... Duration: {}ms", duration_ms);
     log::info!("✅ HTTP REQUEST COMPLETE =====================================");
 
     // 使用新的DomainLogger记录完整的HTTP请求响应日志
@@ -780,6 +789,7 @@ async fn handle_http_request(
         request_body,
         response_body_str,
         url_params,
+        duration_ms,
         request_size, // 使用已计算的request_size
         response_buffer.len(),  // 使用response_buffer.len()替代total_bytes
         false,
