@@ -17,14 +17,26 @@ use crate::config::Config;
 use crate::cert::CertManager;
 use crate::domain_logger::DomainLogger;
 
+/// 代理服务器主结构体
 pub struct ProxyServer {
+    /// 配置信息
     config: Arc<Config>,
+    /// 证书管理器
     cert_manager: Arc<CertManager>,
+    /// HTTP客户端
     client: Client<HttpsConnector<hyper::client::HttpConnector>>,
+    /// 日志记录器
     logger: Arc<DomainLogger>,
 }
 
 impl ProxyServer {
+    /// 创建新的代理服务器实例
+    /// 
+    /// # 参数
+    /// * `config` - 配置信息
+    /// 
+    /// # 返回值
+    /// 返回Result包装的ProxyServer实例，如果过程中出现错误则返回错误信息
     pub fn new(config: Config) -> Result<Self> {
         let cert_manager = CertManager::new(
             &config.certificates.ca_cert,
@@ -43,6 +55,10 @@ impl ProxyServer {
         })
     }
 
+    /// 运行代理服务器
+    /// 
+    /// # 返回值
+    /// 返回Result，如果过程中出现错误则返回错误信息
     pub async fn run(self) -> Result<()> {
         let addr = SocketAddr::new(
             self.config.proxy.host.parse().unwrap(),
@@ -69,6 +85,11 @@ impl ProxyServer {
     }
 }
 
+/// 记录带时间戳的日志
+/// 
+/// # 参数
+/// * `level` - 日志级别
+/// * `message` - 日志消息
 fn log_with_timestamp(level: log::Level, message: &str) {
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -77,26 +98,50 @@ fn log_with_timestamp(level: log::Level, message: &str) {
     log::log!(level, "[{}] {}", timestamp, message);
 }
 
+/// 记录请求开始日志
+/// 
+/// # 参数
+/// * `method` - HTTP方法
+/// * `path` - 请求路径
+/// * `host` - 主机名（可选）
 fn log_request_start(method: &str, path: &str, host: Option<&str>) {
     log::info!("🔍 REQUEST START ========================================");
     log::info!("⏰ Timestamp: {:?}", SystemTime::now());
     log::info!("📝 Method: {}", method);
     log::info!("🔗 Path: {}", path);
+    
     if let Some(h) = host {
         log::info!("🌐 Host: {}", h);
     }
 }
 
+/// 记录响应摘要日志
+/// 
+/// # 参数
+/// * `bytes` - 响应字节数
+/// * `status` - 状态信息（可选）
 fn log_response_summary(bytes: usize, status: Option<&str>) {
     log::info!("📊 RESPONSE SUMMARY ======================================");
     log::info!("⏰ Timestamp: {:?}", SystemTime::now());
     log::info!("📦 Response size: {} bytes", bytes);
+    
     if let Some(s) = status {
         log::info!("🎯 Status: {}", s);
     }
+    
     log::info!("✅ REQUEST COMPLETE =====================================");
 }
 
+/// 处理TCP连接
+/// 
+/// # 参数
+/// * `stream` - TCP流
+/// * `config` - 配置信息
+/// * `cert_manager` - 证书管理器
+/// * `logger` - 日志记录器
+/// 
+/// # 返回值
+/// 返回Result，如果过程中出现错误则返回错误信息
 async fn handle_connection(
     mut stream: TcpStream,
     config: Arc<Config>,
@@ -137,9 +182,13 @@ async fn handle_connection(
     let first_line = lines[0];
     let parts: Vec<&str> = first_line.split_whitespace().collect();
     
-    if parts.len() < 3 {
-        log::warn!("Invalid HTTP request: {}", first_line);
-        return Ok(());
+    // 检查HTTP请求行是否有效
+    match parts.len() {
+        len if len < 3 => {
+            log::warn!("Invalid HTTP request: {}", first_line);
+            return Ok(());
+        },
+        _ => (), // 有效请求行
     }
 
     let method = parts[0];
@@ -164,10 +213,14 @@ async fn handle_connection(
     log::info!("📝 RAW REQUEST:");
     log::info!("{}", String::from_utf8_lossy(&buffer));
 
-    if method == "CONNECT" {
-        handle_https_connect(path, stream, config, cert_manager, logger).await?;
-    } else {
-        handle_http_request(request_str.to_string(), stream, config, logger).await?;
+    // 根据HTTP方法处理不同类型的请求
+    match method {
+        "CONNECT" => {
+            handle_https_connect(path, stream, config, cert_manager, logger).await?;
+        },
+        _ => {
+            handle_http_request(request_str.to_string(), stream, config, logger).await?;
+        }
     }
 
     Ok(())

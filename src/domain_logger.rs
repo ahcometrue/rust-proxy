@@ -3,30 +3,55 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task;
 use crate::config::Config;
+use std::io::Write;
 
+/// 日志条目结构体
 #[derive(Debug, Clone)]
 pub struct LogEntry {
+    /// 主机名
     pub host: String,
+    /// HTTP方法
     pub method: String,
+    /// 请求路径
     pub path: String,
+    /// 请求头
     pub request_headers: HashMap<String, String>,
+    /// 响应头
     pub response_headers: HashMap<String, String>,
+    /// 状态码
     pub status_code: u16,
+    /// 请求体
     pub request_body: String,
+    /// 响应体
     pub response_body: String,
+    /// URL参数
     pub url_params: String,
+    /// 发送字节数
     pub bytes_sent: usize,
+    /// 接收字节数
     pub bytes_received: usize,
+    /// 是否为隧道模式
     pub is_tunnel: bool,
+    /// 错误信息
     pub error: Option<String>,
 }
 
+/// 域名日志记录器
 pub struct DomainLogger {
+    /// 日志发送通道
     sender: mpsc::UnboundedSender<LogEntry>,
+    /// 配置信息
     config: Arc<Config>,
 }
 
 impl DomainLogger {
+    /// 创建新的域名日志记录器
+    /// 
+    /// # 参数
+    /// * `config` - 配置信息
+    /// 
+    /// # 返回值
+    /// 返回Arc包装的DomainLogger实例
     pub fn new(config: Arc<Config>) -> Arc<Self> {
         let (sender, mut receiver) = mpsc::unbounded_channel();
         let config_clone = config.clone();
@@ -41,10 +66,20 @@ impl DomainLogger {
         Arc::new(Self { sender, config })
     }
 
+    /// 记录请求日志
+    /// 
+    /// # 参数
+    /// * `entry` - 日志条目
     pub fn log_request(&self, entry: LogEntry) {
+        // 忽略发送错误，因为这通常意味着接收端已关闭
         let _ = self.sender.send(entry);
     }
 
+    /// 处理日志条目
+    /// 
+    /// # 参数
+    /// * `entry` - 日志条目
+    /// * `config` - 配置信息
     fn process_log_entry(entry: LogEntry, config: &Config) {
         use std::fs::{self, OpenOptions};
         use std::io::Write;
@@ -62,40 +97,16 @@ impl DomainLogger {
         let log_file = Path::new(log_dir).join(format!("{}_{}.log", date, entry.host));
         
         // 根据配置处理请求体
-        let truncated_request_body = if config.logging.domain_logs.request_body_limit == 0 {
-            String::new() // 不记录
-        } else if config.logging.domain_logs.request_body_limit == -1 {
-            // 完整记录
-            entry.request_body.clone()
-        } else if config.logging.domain_logs.request_body_limit > 0 {
-            // 截断到指定长度
-            let limit = config.logging.domain_logs.request_body_limit as usize;
-            if entry.request_body.len() > limit {
-                format!("{}... (truncated)", &entry.request_body[..limit])
-            } else {
-                entry.request_body.clone()
-            }
-        } else {
-            entry.request_body.clone()
-        };
+        let truncated_request_body = Self::process_body_content_helper(
+            &entry.request_body, 
+            config.logging.domain_logs.request_body_limit
+        );
 
         // 根据配置处理响应体
-        let truncated_response_body = if config.logging.domain_logs.response_body_limit == 0 {
-            String::new() // 不记录
-        } else if config.logging.domain_logs.response_body_limit == -1 {
-            // 完整记录
-            entry.response_body.clone()
-        } else if config.logging.domain_logs.response_body_limit > 0 {
-            // 截断到指定长度
-            let limit = config.logging.domain_logs.response_body_limit as usize;
-            if entry.response_body.len() > limit {
-                format!("{}... (truncated)", &entry.response_body[..limit])
-            } else {
-                entry.response_body.clone()
-            }
-        } else {
-            entry.response_body.clone()
-        };
+        let truncated_response_body = Self::process_body_content_helper(
+            &entry.response_body, 
+            config.logging.domain_logs.response_body_limit
+        );
 
         let log_line = format!(
             "[{}] {} {} {} - Status: {} - Req: {} bytes - Resp: {} bytes - Params: {} - Error: {:?}",
@@ -124,18 +135,77 @@ impl DomainLogger {
             // 写入详细信息
             let _ = writeln!(file, "  Request Headers: {:?}", entry.request_headers);
             let _ = writeln!(file, "  Response Headers: {:?}", entry.response_headers);
-            if !entry.request_body.is_empty() {
-                let _ = writeln!(file, "  Request Body: {}", truncated_request_body);
-            }
-            if !entry.response_body.is_empty() {
-                let _ = writeln!(file, "  Response Body: {}", truncated_response_body);
-            }
+            
+            // 根据内容是否为空决定是否写入
+            Self::write_body_content_helper(&mut file, "Request Body", &truncated_request_body);
+            Self::write_body_content_helper(&mut file, "Response Body", &truncated_response_body);
+            
             let _ = writeln!(file, "---");
         } else {
             eprintln!("Failed to write log to file: {}", log_file.display());
         }
     }
 
+    /// 处理请求体/响应体内容辅助函数
+    /// 
+    /// # 参数
+    /// * `body` - 原始内容
+    /// * `limit` - 限制大小
+    /// 
+    /// # 返回值
+    /// 处理后的内容
+    fn process_body_content_helper(body: &str, limit: i64) -> String {
+        match limit {
+            0 => String::new(), // 不记录
+            -1 => body.to_string(), // 完整记录
+            limit if limit > 0 => {
+                // 截断到指定长度
+                let limit = limit as usize;
+                if body.len() > limit {
+                    format!("{}... (truncated)", &body[..limit])
+                } else {
+                    body.to_string()
+                }
+            },
+            _ => body.to_string(), // 默认情况，完整记录
+        }
+    }
+
+    /// 写入请求体/响应体内容到文件辅助函数
+    /// 
+    /// # 参数
+    /// * `file` - 文件句柄
+    /// * `label` - 标签（Request Body或Response Body）
+    /// * `content` - 内容
+    fn write_body_content_helper(file: &mut std::fs::File, label: &str, content: &str) {
+        match content.is_empty() {
+            true => (), // 内容为空时不写入
+            false => {
+                let _ = writeln!(file, "  {}: {}", label, content);
+            }
+        }
+    }
+
+    /// 创建日志条目
+    /// 
+    /// # 参数
+    /// * `host` - 主机名
+    /// * `method` - HTTP方法
+    /// * `path` - 请求路径
+    /// * `request_headers` - 请求头
+    /// * `response_headers` - 响应头
+    /// * `status_code` - 状态码
+    /// * `request_body` - 请求体
+    /// * `response_body` - 响应体
+    /// * `url_params` - URL参数
+    /// * `bytes_sent` - 发送字节数
+    /// * `bytes_received` - 接收字节数
+    /// * `is_tunnel` - 是否为隧道模式
+    /// * `error` - 错误信息
+    /// 
+    /// # 返回值
+    /// 返回构建的LogEntry实例
+    #[allow(clippy::too_many_arguments)]
     pub fn create_log_entry(
         host: String,
         method: String,
@@ -168,6 +238,16 @@ impl DomainLogger {
         }
     }
 
+    /// 创建隧道模式日志条目
+    /// 
+    /// # 参数
+    /// * `host` - 主机名
+    /// * `bytes_sent` - 发送字节数
+    /// * `bytes_received` - 接收字节数
+    /// * `error` - 错误信息
+    /// 
+    /// # 返回值
+    /// 返回构建的LogEntry实例
     pub fn create_tunnel_log_entry(
         host: String,
         bytes_sent: usize,
@@ -191,5 +271,3 @@ impl DomainLogger {
         }
     }
 }
-
-// 移除Default实现，因为需要Config参数
