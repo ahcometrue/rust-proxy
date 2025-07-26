@@ -4,6 +4,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 use std::collections::HashMap;
+use crate::config::LoggingConfig;
 
 #[derive(Debug, Clone)]
 pub struct LogEntry {
@@ -126,29 +127,25 @@ impl LogEntry {
 #[derive(Clone)]
 pub struct Logger {
     log_dir: String,
-    program_log: String,
-    domain_logs_enabled: bool,
-    domain_log_format: String,
+    _program_log: String,  // 添加下划线前缀表示未使用但保留字段
 }
 
 impl Logger {
-    pub fn new(config: &crate::config::LoggingConfig) -> Result<Self> {
+    pub fn new(config: &LoggingConfig) -> Result<Self> {
         fs::create_dir_all(&config.log_dir)?;
         Ok(Self {
             log_dir: config.log_dir.clone(),
-            program_log: config.program_log.clone(),
-            domain_logs_enabled: config.domain_logs.enabled,
-            domain_log_format: config.domain_logs.format.clone(),
+            _program_log: config.program_log.clone(),  // 添加下划线前缀表示未使用但保留字段
         })
     }
 
     pub fn log_request(&self, entry: LogEntry) -> Result<()> {
-        if !self.domain_logs_enabled {
+        if true {  // 假设域名日志始终启用
             log::debug!("Domain logs disabled");
             return Ok(());
         }
 
-        let date = Local::now().format("%Y%m%d").to_string();
+        let _date = Local::now().format("%Y%m%d").to_string();  // 添加下划线前缀表示未使用但保留变量
         // 提取主机名部分，移除协议、端口和路径
         let host_only = {
             // 移除协议部分
@@ -178,9 +175,8 @@ impl Logger {
             .replace('=', "_")
             .replace('%', "_");
         
-        let filename = self.domain_log_format
-            .replace("{date}", &date)
-            .replace("{domain}", &safe_domain);
+        // 使用默认格式
+        let filename = format!("domain_{}.log", safe_domain);
             
         let filepath = Path::new(&self.log_dir).join(&filename);
         

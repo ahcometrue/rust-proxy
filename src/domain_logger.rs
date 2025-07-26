@@ -26,12 +26,6 @@ pub struct LogEntry {
     pub response_body: String,
     /// URL参数
     pub url_params: String,
-    /// 发送字节数
-    pub bytes_sent: usize,
-    /// 接收字节数
-    pub bytes_received: usize,
-    /// 是否为隧道模式
-    pub is_tunnel: bool,
     /// 错误信息
     pub error: Option<String>,
 }
@@ -40,8 +34,6 @@ pub struct LogEntry {
 pub struct DomainLogger {
     /// 日志发送通道
     sender: mpsc::UnboundedSender<LogEntry>,
-    /// 配置信息
-    config: Arc<Config>,
 }
 
 impl DomainLogger {
@@ -63,7 +55,7 @@ impl DomainLogger {
             }
         });
 
-        Arc::new(Self { sender, config })
+        Arc::new(Self { sender })
     }
 
     /// 记录请求日志
@@ -84,8 +76,9 @@ impl DomainLogger {
         use std::fs::{self, OpenOptions};
         use std::io::Write;
         use std::path::Path;
+        use chrono::Local;
         
-        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let date = Local::now().format("%Y-%m-%d").to_string();
         
         // 确保日志目录存在
         let log_dir = &config.logging.log_dir;
@@ -110,7 +103,7 @@ impl DomainLogger {
 
         let log_line = format!(
             "[{}] {} {} {} - Status: {} - Req: {} bytes - Resp: {} bytes - Params: {} - Error: {:?}",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            Local::now().format("%Y-%m-%d %H:%M:%S"),
             entry.host,
             entry.method,
             entry.path,
@@ -216,9 +209,9 @@ impl DomainLogger {
         request_body: String,
         response_body: String,
         url_params: String,
-        bytes_sent: usize,
-        bytes_received: usize,
-        is_tunnel: bool,
+        _bytes_sent: usize,
+        _bytes_received: usize,
+        _is_tunnel: bool,
         error: Option<String>,
     ) -> LogEntry {
         LogEntry {
@@ -231,9 +224,6 @@ impl DomainLogger {
             request_body,
             response_body,
             url_params,
-            bytes_sent,
-            bytes_received,
-            is_tunnel,
             error,
         }
     }
@@ -250,8 +240,8 @@ impl DomainLogger {
     /// 返回构建的LogEntry实例
     pub fn create_tunnel_log_entry(
         host: String,
-        bytes_sent: usize,
-        bytes_received: usize,
+        _bytes_sent: usize,
+        _bytes_received: usize,
         error: Option<String>,
     ) -> LogEntry {
         LogEntry {
@@ -264,9 +254,6 @@ impl DomainLogger {
             request_body: String::new(),
             response_body: String::new(),
             url_params: String::new(),
-            bytes_sent,
-            bytes_received,
-            is_tunnel: true,
             error,
         }
     }

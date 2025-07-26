@@ -1,6 +1,4 @@
 use anyhow::Result;
-use hyper::Client;
-use hyper_tls::HttpsConnector;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -10,7 +8,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::rustls::{ServerConfig};
 use std::io::{BufReader, Cursor};
-use std::convert::Infallible;
 use std::collections::HashMap;
 
 use crate::config::Config;
@@ -23,8 +20,6 @@ pub struct ProxyServer {
     config: Arc<Config>,
     /// 证书管理器
     cert_manager: Arc<CertManager>,
-    /// HTTP客户端
-    client: Client<HttpsConnector<hyper::client::HttpConnector>>,
     /// 日志记录器
     logger: Arc<DomainLogger>,
 }
@@ -43,14 +38,11 @@ impl ProxyServer {
             &config.certificates.ca_key,
         )?;
 
-        let https = HttpsConnector::new();
-        let client = Client::builder().build::<_, hyper::Body>(https);
         let logger = DomainLogger::new(Arc::new(config.clone()));
 
         Ok(Self {
             config: Arc::new(config),
             cert_manager: Arc::new(cert_manager),
-            client,
             logger,
         })
     }
@@ -85,50 +77,26 @@ impl ProxyServer {
     }
 }
 
-/// 记录带时间戳的日志
-/// 
-/// # 参数
-/// * `level` - 日志级别
-/// * `message` - 日志消息
-fn log_with_timestamp(level: log::Level, message: &str) {
-    let timestamp = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    log::log!(level, "[{}] {}", timestamp, message);
-}
 
 /// 记录请求开始日志
-/// 
-/// # 参数
-/// * `method` - HTTP方法
-/// * `path` - 请求路径
-/// * `host` - 主机名（可选）
 fn log_request_start(method: &str, path: &str, host: Option<&str>) {
     log::info!("🔍 REQUEST START ========================================");
     log::info!("⏰ Timestamp: {:?}", SystemTime::now());
     log::info!("📝 Method: {}", method);
     log::info!("🔗 Path: {}", path);
-    
-    if let Some(h) = host {
-        log::info!("🌐 Host: {}", h);
+    if let Some(host) = host {
+        log::info!("🌐 Host: {}", host);
     }
 }
 
 /// 记录响应摘要日志
-/// 
-/// # 参数
-/// * `bytes` - 响应字节数
-/// * `status` - 状态信息（可选）
 fn log_response_summary(bytes: usize, status: Option<&str>) {
     log::info!("📊 RESPONSE SUMMARY ======================================");
     log::info!("⏰ Timestamp: {:?}", SystemTime::now());
     log::info!("📦 Response size: {} bytes", bytes);
-    
-    if let Some(s) = status {
-        log::info!("🎯 Status: {}", s);
+    if let Some(status) = status {
+        log::info!("🔢 Status: {}", status);
     }
-    
     log::info!("✅ REQUEST COMPLETE =====================================");
 }
 
@@ -245,14 +213,13 @@ async fn handle_https_connect(
     log::info!("🔍 Intercept: {}", config.should_intercept(&host, port));
 
     // 记录CONNECT请求
-    let logger_clone = logger.clone();
     let log_entry = DomainLogger::create_tunnel_log_entry(
         host.clone(),
         0,
         0,
         None,
     );
-    logger_clone.log_request(log_entry);
+    logger.log_request(log_entry);
 
     if !config.should_intercept(&host, port) {
         log::info!("🚇 DIRECT TUNNEL MODE ===================================");
@@ -271,7 +238,6 @@ async fn handle_https_connect(
         log::info!("Bytes transferred: client={}, server={}", client_bytes, server_bytes);
         
         // 使用新的DomainLogger记录隧道模式日志
-        let logger_clone = logger.clone();
         let log_entry = DomainLogger::create_log_entry(
             host.clone(),
             "CONNECT".to_string(),
@@ -287,7 +253,7 @@ async fn handle_https_connect(
             true, // 标记为隧道模式
             None,
         );
-        logger_clone.log_request(log_entry);
+        logger.log_request(log_entry);
         return Ok(());
     }
 
@@ -467,19 +433,14 @@ async fn handle_https_connect(
     
     log::info!("Reading HTTPS response...");
     
-    let mut first_chunk = true;
-    let mut bytes_received = 0;
-    
     loop {
         let bytes_read = tls_server_stream.read(&mut buffer).await?;
         if bytes_read == 0 {
             break;
         }
         
-        bytes_received += bytes_read;
-        
         // 验证第一块数据是否包含HTTP状态行
-        if first_chunk && bytes_read > 0 {
+        if response_buffer.is_empty() && bytes_read > 0 {
             let chunk_str = String::from_utf8_lossy(&buffer[..bytes_read]);
             if !chunk_str.starts_with("HTTP/") {
                 log::warn!("HTTPS response missing HTTP status line, adding HTTP/1.1 200 OK");
@@ -488,7 +449,7 @@ async fn handle_https_connect(
                 let http_header = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
                 tls_stream.write_all(http_header).await?;
                 tls_stream.write_all(&buffer[..bytes_read]).await?;
-                first_chunk = false;
+                response_buffer.extend_from_slice(&buffer[..bytes_read]);
                 continue;
             }
         }
@@ -496,11 +457,9 @@ async fn handle_https_connect(
         // 正常转发HTTP响应
         tls_stream.write_all(&buffer[..bytes_read]).await?;
         response_buffer.extend_from_slice(&buffer[..bytes_read]);
-        first_chunk = false;
     }
     
-    let total_bytes = response_buffer.len();
-    log::info!("✅ HTTPS REQUEST COMPLETE - {} bytes transferred", total_bytes);
+    log::info!("✅ HTTPS REQUEST COMPLETE - {} bytes transferred", response_buffer.len());
     
     // 解析响应头和状态码用于日志记录
     let response_str = String::from_utf8_lossy(&response_buffer);
@@ -532,7 +491,6 @@ async fn handle_https_connect(
     }
     
     // 使用新的DomainLogger记录完整的HTTPS请求响应日志
-    let logger_clone = logger.clone();
     let response_body_str = if header_end > 0 && header_end < response_buffer.len() {
         String::from_utf8_lossy(&response_buffer[header_end..]).to_string()
     } else {
@@ -542,18 +500,18 @@ async fn handle_https_connect(
         host.clone(),
         method.to_string(),
         format!("https://{}:{}{}", host, port, path),
-        request_headers.clone(),
+        request_headers,
         response_headers_map,
         response_status,
-        request_body.clone(),
+        request_body,
         response_body_str,
-        url_params.clone(),
+        url_params,
         new_request.len(),
-        total_bytes,
+        response_buffer.len(),  // 使用response_buffer.len()替代total_bytes
         false,
         None,
     );
-    logger_clone.log_request(log_entry);
+    logger.log_request(log_entry);
     
     Ok(())
 }
@@ -629,7 +587,6 @@ async fn handle_http_request(
     log::info!("{}", request);
 
     // 使用新的DomainLogger记录请求日志（异步，不阻塞主流程）
-    let logger_clone = logger.clone();
     
     // 收集请求信息
     let request_headers: HashMap<String, String> = lines[1..].iter()
@@ -723,7 +680,7 @@ async fn handle_http_request(
     }
 
     // 读取整个响应到缓冲区
-    let mut total_bytes = 0;
+    let mut _total_bytes = 0;
     let mut response_buffer = Vec::new();
     let mut buffer = [0; 4096];
     
@@ -734,7 +691,7 @@ async fn handle_http_request(
             break;
         }
         response_buffer.extend_from_slice(&buffer[..bytes_read]);
-        total_bytes += bytes_read;
+        _total_bytes += bytes_read;
     }
     
     // 验证并修复HTTP响应格式
@@ -757,7 +714,7 @@ async fn handle_http_request(
             fixed_response.extend_from_slice(&response_buffer);
             
             client_stream.write_all(&fixed_response).await?;
-            total_bytes = fixed_response.len();
+            _total_bytes = fixed_response.len();
         } else {
             // 响应格式正确，直接转发
             client_stream.write_all(&response_buffer).await?;
@@ -802,41 +759,12 @@ async fn handle_http_request(
         Vec::new()
     };
     
-    let status = status_line.split_whitespace().nth(1).unwrap_or("Unknown");
-    log_response_summary(total_bytes, Some(status));
+    let _status = status_line.split_whitespace().nth(1).unwrap_or("Unknown");
+    log_response_summary(_total_bytes, Some(&_status));
     log::info!("Forwarding response to client...");
     log::info!("✅ HTTP REQUEST COMPLETE =====================================");
 
-    // 收集请求头
-    let request_headers: HashMap<String, String> = lines[1..].iter()
-        .take_while(|l| !l.is_empty())
-        .filter_map(|l| l.split_once(':'))
-        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
-        .collect();
-
-    // 解析URL参数
-    let url_params = if let Some(query_start) = path.find('?') {
-        let query = &path[query_start + 1..];
-        query.split('&')
-            .filter_map(|pair| pair.split_once('='))
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("&")
-    } else {
-        String::new()
-    };
-
-    // 提取请求体
-    let request_body = if let Some(body_start) = request.find("\r\n\r\n") {
-        request[body_start + 4..].to_string()
-    } else {
-        String::new()
-    };
-
-
-
     // 使用新的DomainLogger记录完整的HTTP请求响应日志
-    let logger_clone = logger.clone();
     let response_body_str = if !response_body.is_empty() {
         String::from_utf8_lossy(&response_body).to_string()
     } else {
@@ -853,67 +781,28 @@ async fn handle_http_request(
         response_body_str,
         url_params,
         request_size, // 使用已计算的request_size
-        total_bytes,
+        response_buffer.len(),  // 使用response_buffer.len()替代total_bytes
         false,
         None,
     );
-    logger_clone.log_request(log_entry);
+    logger.log_request(log_entry);
 
     Ok(())
 }
 
-async fn tunnel_connection(
-    client: impl AsyncReadExt + AsyncWriteExt + Unpin + Send,
-    server: impl AsyncReadExt + AsyncWriteExt + Unpin + Send,
-) -> Result<(), Infallible> {
-    let (mut client_reader, mut client_writer) = tokio::io::split(client);
-    let (mut server_reader, mut server_writer) = tokio::io::split(server);
+async fn tunnel_connection_with_logging(
+    client_stream: TcpStream,
+    server_stream: TcpStream,
+) -> Result<(u64, u64), std::io::Error> {
+    let (mut client_reader, mut client_writer) = tokio::io::split(client_stream);
+    let (mut server_reader, mut server_writer) = tokio::io::split(server_stream);
 
-    log::info!("Starting bidirectional tunnel...");
-    
     let client_to_server = tokio::io::copy(&mut client_reader, &mut server_writer);
     let server_to_client = tokio::io::copy(&mut server_reader, &mut client_writer);
 
-    match tokio::try_join!(client_to_server, server_to_client) {
-        Ok((bytes_up, bytes_down)) => {
-            log::info!("Tunnel closed successfully");
-            log::info!("Bytes transferred: client→server={}, server→client={}", bytes_up, bytes_down);
-        }
-        Err(e) => {
-            log::error!("Tunnel error: {}", e);
-        }
-    }
+    let (bytes_client_to_server, bytes_server_to_client) = tokio::try_join!(client_to_server, server_to_client)?;
 
-    Ok(())
-}
-
-async fn tunnel_connection_with_logging<T, U>(
-    client: T,
-    server: U,
-) -> Result<(u64, u64)>
-where
-    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-    U: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-{
-    let (mut client_reader, mut client_writer) = tokio::io::split(client);
-    let (mut server_reader, mut server_writer) = tokio::io::split(server);
-
-    log::info!("Starting tunnel with detailed logging...");
-    
-    let client_to_server = tokio::io::copy(&mut client_reader, &mut server_writer);
-    let server_to_client = tokio::io::copy(&mut server_reader, &mut client_writer);
-
-    match tokio::try_join!(client_to_server, server_to_client) {
-        Ok((bytes_up, bytes_down)) => {
-            log::info!("Tunnel closed successfully");
-            log::info!("Bytes transferred: client→server={}, server→client={}", bytes_up, bytes_down);
-            Ok((bytes_up, bytes_down))
-        }
-        Err(e) => {
-            log::error!("Tunnel error: {}", e);
-            Ok((0, 0))
-        }
-    }
+    Ok((bytes_client_to_server, bytes_server_to_client))
 }
 
 

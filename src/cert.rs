@@ -3,15 +3,12 @@ use rustls::{Certificate, PrivateKey};
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
-use rcgen::{date_time_ymd, KeyPair, PKCS_ECDSA_P256_SHA256};
 
 /// 证书管理器，负责CA证书的生成、加载和站点证书的签发
 /// 
 /// 该结构体实现了证书的持久化存储，当证书文件存在时会复用现有证书，
 /// 不存在时则会生成新的证书并保存到文件系统中。
 pub struct CertManager {
-    /// CA证书
-    ca_cert: Certificate,
     /// CA私钥
     ca_key: PrivateKey,
 }
@@ -44,7 +41,7 @@ impl CertManager {
                 Self::save_certificates(ca_cert_path, ca_key_path, &ca_cert, &ca_key)?;
                 log::info!("Saved new CA certificate and key to files");
                 
-                Ok(Self { ca_cert, ca_key })
+                Ok(Self { ca_key })
             }
         }
     }
@@ -79,10 +76,9 @@ impl CertManager {
 
         // 确保证书和私钥都成功加载
         match (certs.first(), keys.first()) {
-            (Some(cert_data), Some(key_data)) => {
-                let ca_cert = Certificate(cert_data.clone());
+            (Some(_cert_data), Some(key_data)) => {
                 let ca_key = PrivateKey(key_data.clone());
-                Some(Self { ca_cert, ca_key })
+                Some(Self { ca_key })
             },
             _ => {
                 log::warn!("Failed to load existing certificate or key data");
