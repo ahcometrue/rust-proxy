@@ -1,0 +1,28 @@
+{
+  "proxy": {
+    "host": "127.0.0.1",
+    "port": 8888
+  },
+  "target": {
+    "domains": [
+      "*"
+    ],
+    "ports": ["*"]
+  },
+  "certificates": {
+    "ca_cert": "certs/ca.crt",
+    "ca_key": "certs/ca.key"
+  },
+  "logging": {
+    "level": "debug",
+    "output": "file",
+    "log_dir": "logs",
+    "program_log": "proxy.log",
+    "domain_logs": {
+      "enabled": true,
+      "format": "{date}_{domain}.log",
+      "request_body_limit": 1024,
+      "response_body_limit": -1
+    }
+  }
+}
