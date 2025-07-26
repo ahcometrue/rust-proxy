@@ -8,7 +8,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use tokio_rustls::TlsAcceptor;
-use tokio_rustls::rustls::{Certificate, PrivateKey, ServerConfig};
+use tokio_rustls::rustls::{ServerConfig};
 use std::io::{BufReader, Cursor};
 use std::convert::Infallible;
 use std::collections::HashMap;

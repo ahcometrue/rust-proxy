@@ -129,6 +129,7 @@ impl CertManager {
     
     fn load_signer(&self) -> Result<rcgen::Certificate> {
         use rcgen::*;
+        use anyhow::Context;
         
         // 创建一个临时的CertificateParams来重建CA证书
         let mut params = CertificateParams::default();
@@ -143,7 +144,8 @@ impl CertManager {
         ];
         
         // 使用CA私钥重建KeyPair
-        let key_pair = KeyPair::from_der(&self.ca_key.0)?;
+        let key_pair = KeyPair::from_der(&self.ca_key.0)
+            .context("Failed to create KeyPair from DER")?;
         params.alg = key_pair.algorithm();
         params.key_pair = Some(key_pair);
         
@@ -152,10 +154,5 @@ impl CertManager {
         params.not_after = date_time_ymd(2034, 12, 31);
         
         Ok(Certificate::from_params(params)?)
-    }
-    
-    // 提供获取CA证书的方法，供其他模块使用
-    pub fn ca_cert(&self) -> &Certificate {
-        &self.ca_cert
     }
 }
