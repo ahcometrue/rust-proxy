@@ -46,11 +46,20 @@ impl DomainLogger {
     }
 
     fn process_log_entry(entry: LogEntry, config: &Config) {
-        use std::fs::OpenOptions;
+        use std::fs::{self, OpenOptions};
         use std::io::Write;
+        use std::path::Path;
         
         let date = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let log_file = format!("logs/{}_{}.log", date, entry.host);
+        
+        // 确保日志目录存在
+        let log_dir = &config.logging.log_dir;
+        if let Err(e) = fs::create_dir_all(log_dir) {
+            eprintln!("Failed to create log directory {}: {}", log_dir, e);
+            return;
+        }
+        
+        let log_file = Path::new(log_dir).join(format!("{}_{}.log", date, entry.host));
         
         // 根据配置处理请求体
         let truncated_request_body = if config.logging.domain_logs.request_body_limit == 0 {
@@ -123,7 +132,7 @@ impl DomainLogger {
             }
             let _ = writeln!(file, "---");
         } else {
-            eprintln!("Failed to write log to file: {}", log_file);
+            eprintln!("Failed to write log to file: {}", log_file.display());
         }
     }
 
