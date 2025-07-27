@@ -21,8 +21,8 @@
     "domain_logs": {
       "enabled": true,
       "format": "{date}_{domain}.log",
-      "request_body_limit": 1024,
-      "response_body_limit": -1
+      "request_body_limit": 0,
+      "response_body_limit": 0
     }
   }
 }

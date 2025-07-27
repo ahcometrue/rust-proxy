@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 hyper = { version = "0.14", features = ["full"] }
-hyper-tls = "0.5"
 tokio-rustls = "0.24"
 tokio-native-tls = "0.3"
 rustls-pemfile = "1.0"

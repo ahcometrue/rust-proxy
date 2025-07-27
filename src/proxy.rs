@@ -207,12 +207,10 @@ async fn handle_https_connect(
     // 记录CONNECT请求
     let duration_ms = start_time.elapsed().as_millis();
     let log_entry = DomainLogger::create_tunnel_log_entry(
-        host.clone(),
-        duration_ms,
-        0,
-        0,
-        None,
-    );
+            host.clone(),
+            duration_ms,
+            None,
+        );
     logger.log_request(log_entry);
 
     if !config.should_intercept(&host, port) {
@@ -244,9 +242,6 @@ async fn handle_https_connect(
             String::new(),
             String::new(),
             duration_ms,
-            client_bytes as usize,
-            server_bytes as usize,
-            true, // 标记为隧道模式
             None,
         );
         logger.log_request(log_entry);
@@ -596,10 +591,7 @@ async fn handle_https_connect(
         request_body,
         response_body_str,
         url_params,
-        duration_ms,  // 注意：参数位置调整为 duration_ms
-        new_request.len(),
-        response_buffer.len(),
-        false,
+        duration_ms,
         None,
     );
     logger.log_request(log_entry);
@@ -693,7 +685,7 @@ async fn handle_http_request(
     let mut new_request = format!("{method} {path} HTTP/1.1\r\n");
     
     // 计算请求总大小
-    let request_size = new_request.len() + request_body.len();
+    let _request_size = new_request.len() + request_body.len();
     
     // 收集并打印原始请求头
     let mut headers_map = HashMap::new();
@@ -820,9 +812,6 @@ async fn handle_http_request(
         response_body_str,
         url_params,
         duration_ms,
-        request_size,
-        response_buffer.len(),
-        false,
         None,
     );
     logger.log_request(log_entry);

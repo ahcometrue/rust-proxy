@@ -195,9 +195,6 @@ impl DomainLogger {
     /// * `response_body` - 响应体
     /// * `url_params` - URL参数
     /// * `duration_ms` - 处理耗时（毫秒）
-    /// * `bytes_sent` - 发送字节数
-    /// * `bytes_received` - 接收字节数
-    /// * `is_tunnel` - 是否为隧道模式
     /// * `error` - 错误信息
     /// 
     /// # 返回值
@@ -214,9 +211,6 @@ impl DomainLogger {
         response_body: String,
         url_params: String,
         duration_ms: u128,
-        _bytes_sent: usize,
-        _bytes_received: usize,
-        _is_tunnel: bool,
         error: Option<String>,
     ) -> LogEntry {
         LogEntry {
@@ -239,8 +233,6 @@ impl DomainLogger {
     /// # 参数
     /// * `host` - 主机名
     /// * `duration_ms` - 处理耗时（毫秒）
-    /// * `bytes_sent` - 发送字节数
-    /// * `bytes_received` - 接收字节数
     /// * `error` - 错误信息
     /// 
     /// # 返回值
@@ -248,8 +240,6 @@ impl DomainLogger {
     pub fn create_tunnel_log_entry(
         host: String,
         duration_ms: u128,
-        _bytes_sent: usize,
-        _bytes_received: usize,
         error: Option<String>,
     ) -> LogEntry {
         LogEntry {
@@ -341,9 +331,6 @@ mod tests {
             "test response body".to_string(),
             "param1=value1&param2=value2".to_string(),
             150, // duration_ms
-            100,
-            200,
-            false,
             None,
         );
         
@@ -368,8 +355,6 @@ mod tests {
         let log_entry = DomainLogger::create_tunnel_log_entry(
             "example.com".to_string(),
             200, // duration_ms
-            100,
-            200,
             Some("test error".to_string()),
         );
         
