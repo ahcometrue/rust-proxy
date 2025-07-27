@@ -56,6 +56,24 @@ fn default_response_body_limit() -> i64 {
     1024
 }
 
+/// 系统代理配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemProxyConfig {
+    /// 是否启用系统代理
+    pub enabled: bool,
+    /// 是否自动配置系统代理
+    pub auto_configure: bool,
+}
+
+impl Default for SystemProxyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_configure: true,
+        }
+    }
+}
+
 /// 日志配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
@@ -76,6 +94,9 @@ pub struct LoggingConfig {
 pub struct Config {
     /// 代理配置
     pub proxy: ProxyConfig,
+    /// 系统代理配置
+    #[serde(default)]
+    pub system_proxy: SystemProxyConfig,
     /// 目标配置
     pub target: TargetConfig,
     /// 证书配置
@@ -190,6 +211,10 @@ mod tests {
                 "ca_cert": "certs/ca.crt",
                 "ca_key": "certs/ca.key"
             },
+            "system_proxy": {
+                "enabled": true,
+                "auto_configure": true
+            },
             "logging": {
                 "level": "debug",
                 "output": "file",
@@ -209,6 +234,8 @@ mod tests {
         
         assert_eq!(config.proxy.host, "127.0.0.1");
         assert_eq!(config.proxy.port, 8888);
+        assert_eq!(config.system_proxy.enabled, true);
+        assert_eq!(config.system_proxy.auto_configure, true);
         assert_eq!(config.target.domains, vec!["example.com"]);
         assert_eq!(config.target.ports, vec![80, 443]);
         assert_eq!(config.certificates.ca_cert, "certs/ca.crt");
@@ -235,6 +262,7 @@ mod tests {
                 ca_cert: "certs/ca.crt".to_string(),
                 ca_key: "certs/ca.key".to_string(),
             },
+            system_proxy: SystemProxyConfig::default(),
             logging: LoggingConfig {
                 level: "debug".to_string(),
                 output: "file".to_string(),

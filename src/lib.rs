@@ -1,11 +1,13 @@
 pub mod config;
 pub mod cert;
 pub mod domain_logger;
+pub mod system_proxy;
 
 // 公共导出
 pub use config::Config;
 pub use cert::CertManager;
 pub use domain_logger::{DomainLogger, LogEntry};
+pub use system_proxy::{SystemProxyManager, ProxyConfig};
 
 #[cfg(test)]
 mod tests {

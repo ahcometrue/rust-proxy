@@ -3,9 +3,16 @@
     "host": "127.0.0.1",
     "port": 8888
   },
+  "system_proxy": {
+    "enabled": true,
+    "auto_configure": true
+  },
   "target": {
     "domains": [
-      "*"
+      "mobile.yangkeduo.com",
+      "gateway.fengniaoyq.online",
+      "gateway.yangkeduo.com",
+      "api.yangkeduo.com"
     ],
     "ports": ["*"]
   },
@@ -21,8 +28,8 @@
     "domain_logs": {
       "enabled": true,
       "format": "{date}_{domain}.log",
-      "request_body_limit": 0,
-      "response_body_limit": 0
+      "request_body_limit": -1,
+      "response_body_limit": -1
     }
   }
 }
