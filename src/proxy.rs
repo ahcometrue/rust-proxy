@@ -89,16 +89,7 @@ fn log_request_start(method: &str, path: &str, host: Option<&str>) {
     }
 }
 
-/// 记录响应摘要日志
-fn log_response_summary(bytes: usize, status: Option<&str>) {
-    log::info!("📊 RESPONSE SUMMARY ======================================");
-    log::info!("⏰ Timestamp: {:?}", SystemTime::now());
-    log::info!("📦 Response size: {bytes} bytes");
-    if let Some(status) = status {
-        log::info!("🔢 Status: {status}");
-    }
-    log::info!("✅ REQUEST COMPLETE =====================================");
-}
+
 
 /// 处理TCP连接
 /// 
@@ -435,33 +426,126 @@ async fn handle_https_connect(
     // 读取并验证HTTPS响应格式
     let mut response_buffer = Vec::new();
     let mut buffer = [0; 4096];
-    
+
     log::info!("Reading HTTPS response...");
+
+    // 读取HTTP响应头
+    let mut headers_read = false;
+    let mut content_length: Option<usize> = None;
+    let mut transfer_encoding_chunked = false;
+    let mut connection_close = false;
     
     loop {
         let bytes_read = tls_server_stream.read(&mut buffer).await?;
         if bytes_read == 0 {
             break;
         }
-        
-        // 验证第一块数据是否包含HTTP状态行
-        if response_buffer.is_empty() && bytes_read > 0 {
-            let chunk_str = String::from_utf8_lossy(&buffer[..bytes_read]);
-            if !chunk_str.starts_with("HTTP/") {
-                log::warn!("HTTPS response missing HTTP status line, adding HTTP/1.1 200 OK");
+
+        response_buffer.extend_from_slice(&buffer[..bytes_read]);
+
+        // 寻找响应头结束标记
+        if !headers_read {
+            if let Some(header_end) = response_buffer.windows(4).position(|w| w == b"\r\n\r\n") {
+                headers_read = true;
+                let header_end = header_end + 4;
                 
-                // 构建正确的HTTP响应头
-                let http_header = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
-                tls_stream.write_all(http_header).await?;
-                tls_stream.write_all(&buffer[..bytes_read]).await?;
-                response_buffer.extend_from_slice(&buffer[..bytes_read]);
+                // 解析响应头
+                let headers_str = String::from_utf8_lossy(&response_buffer[..header_end]);
+                let lines: Vec<&str> = headers_str.lines().collect();
+                
+                // 检查状态行
+                if let Some(status_line) = lines.first() {
+                    if !status_line.starts_with("HTTP/") {
+                        log::warn!("HTTPS response missing HTTP status line, adding HTTP/1.1 200 OK");
+                        let http_header = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+                        tls_stream.write_all(http_header).await?;
+                        tls_stream.write_all(&response_buffer[header_end..]).await?;
+                        continue;
+                    }
+                }
+                
+                // 解析响应头信息
+                for line in &lines[1..] {
+                    if line.is_empty() {
+                        break;
+                    }
+                    if let Some(colon_pos) = line.find(':') {
+                        let key = line[..colon_pos].trim().to_lowercase();
+                        let value = line[colon_pos + 1..].trim();
+                        
+                        match key.as_str() {
+                            "content-length" => {
+                                content_length = value.parse().ok();
+                            },
+                            "transfer-encoding" => {
+                                transfer_encoding_chunked = value.to_lowercase().contains("chunked");
+                            },
+                            "connection" => {
+                                connection_close = value.to_lowercase().contains("close");
+                            },
+                            _ => {}
+                        }
+                    }
+                }
+                
+                // 立即转发响应头
+                tls_stream.write_all(&response_buffer[..header_end]).await?;
+                
+                // 检查是否可以直接判断是否结束
+                if !transfer_encoding_chunked {
+                    if let Some(length) = content_length {
+                        let body_start = header_end;
+                        let body_length = response_buffer.len().saturating_sub(body_start);
+                        
+                        if body_length >= length {
+                            // 已经收到完整的响应体
+                            tls_stream.write_all(&response_buffer[body_start..body_start + length]).await?;
+                            break;
+                        }
+                    } else if connection_close {
+                        // Connection: close，继续读取直到连接关闭
+                        tls_stream.write_all(&response_buffer[header_end..]).await?;
+                        continue;
+                    } else {
+                        // 没有Content-Length且不是chunked，继续读取
+                        tls_stream.write_all(&response_buffer[header_end..]).await?;
+                        continue;
+                    }
+                } else {
+                    // Chunked传输，需要解析chunk
+                    let body_start = header_end;
+                    tls_stream.write_all(&response_buffer[body_start..]).await?;
+                    
+                    // 检查是否已经收到完整的chunked响应
+                    let body = &response_buffer[body_start..];
+                    if is_chunked_complete(body) {
+                        break;
+                    }
+                    continue;
+                }
+            } else {
+                // 还没找到完整的响应头，继续读取
                 continue;
             }
         }
         
-        // 正常转发HTTP响应
+        // 已经解析了响应头，现在根据传输方式决定何时结束
+        if transfer_encoding_chunked {
+            let body = &response_buffer;
+            if is_chunked_complete(body) {
+                break;
+            }
+        } else if let Some(length) = content_length {
+            let body_start = response_buffer.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4).unwrap_or(0);
+            let body_length = response_buffer.len().saturating_sub(body_start);
+            
+            if body_length >= length {
+                break;
+            }
+        }
+        
+        // 转发新读取的数据
         tls_stream.write_all(&buffer[..bytes_read]).await?;
-        response_buffer.extend_from_slice(&buffer[..bytes_read]);
     }
     
     let duration_ms = start_time.elapsed().as_millis();
@@ -523,6 +607,23 @@ async fn handle_https_connect(
     Ok(())
 }
 
+/// 检查chunked传输是否完成
+fn is_chunked_complete(data: &[u8]) -> bool {
+    let data_str = String::from_utf8_lossy(data);
+    
+    // 直接检查终止标记
+    if !data_str.contains("0\r\n\r\n") {
+        return false;
+    }
+    
+    // 解析chunk大小
+    let lines: Vec<&str> = data_str.lines().collect();
+    lines.iter()
+        .find(|line| !line.trim().is_empty())
+        .and_then(|line| usize::from_str_radix(line.trim(), 16).ok())
+        .map_or(false, |size| size == 0)
+}
+
 async fn handle_http_request(
     request: String,
     mut client_stream: TcpStream,
@@ -548,43 +649,7 @@ async fn handle_http_request(
     let _version = parts[2];
 
     // 解析URL和目标
-    let (host, port, path) = if url.starts_with("http://") {
-        let url_parts: Vec<&str> = url.splitn(3, '/').collect();
-        let host_port = url_parts[2];
-        let host_parts: Vec<&str> = host_port.splitn(2, ':').collect();
-        let host = host_parts[0].to_string();
-        let port = if host_parts.len() > 1 { host_parts[1].parse().unwrap_or(80) } else { 80 };
-        let path = if url_parts.len() > 2 {
-            format!("/{}", url_parts[2..].join("/"))
-        } else {
-            "/".to_string()
-        };
-        (host, port, path)
-    } else if url.starts_with("https://") {
-        let url_parts: Vec<&str> = url.splitn(3, '/').collect();
-        let host_port = url_parts[2];
-        let host_parts: Vec<&str> = host_port.splitn(2, ':').collect();
-        let host = host_parts[0].to_string();
-        let port = if host_parts.len() > 1 { host_parts[1].parse().unwrap_or(443) } else { 443 };
-        let path = if url_parts.len() > 2 {
-            format!("/{}", url_parts[2..].join("/"))
-        } else {
-            "/".to_string()
-        };
-        (host, port, path)
-    } else {
-        // 绝对路径格式，从Host头获取
-        let host_line = lines.iter().find(|line| line.to_lowercase().starts_with("host:"));
-        let host = host_line
-            .and_then(|line| line.split(':').nth(1))
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        let host_parts: Vec<&str> = host.split(':').collect();
-        let host = host_parts[0].to_string();
-        let port = if host_parts.len() > 1 { host_parts[1].parse().unwrap_or(80) } else { 80 };
-        (host, port, url.to_string())
-    };
+    let (host, port, path) = parse_url_and_target(url, &lines)?;
 
     log::info!("🌐 HTTP REQUEST ==========================================");
     log::info!("⏰ Timestamp: {:?}", SystemTime::now());
@@ -687,64 +752,40 @@ async fn handle_http_request(
         }
     }
 
-    // 读取整个响应到缓冲区
-    let mut _total_bytes = 0;
+    // 读取HTTP响应
     let mut response_buffer = Vec::new();
     let mut buffer = [0; 4096];
     
-    log::info!("Reading response...");
-    loop {
-        let bytes_read = server_stream.read(&mut buffer).await?;
+    log::info!("Reading HTTP response...");
+    
+    let mut response_state = ResponseState::new();
+    
+    while let Ok(bytes_read) = server_stream.read(&mut buffer).await {
         if bytes_read == 0 {
             break;
         }
-        response_buffer.extend_from_slice(&buffer[..bytes_read]);
-        _total_bytes += bytes_read;
-    }
-    
-    // 验证并修复HTTP响应格式
-    if !response_buffer.is_empty() {
-        let response_str = String::from_utf8_lossy(&response_buffer);
         
-        // 检查是否以HTTP状态行开始
-        if !response_str.starts_with("HTTP/") {
-            log::warn!("Response missing HTTP status line, wrapping with HTTP/1.1 200 OK");
-            
-            // 构建正确的HTTP响应
-            let mut fixed_response = Vec::new();
-            fixed_response.extend_from_slice(b"HTTP/1.1 200 OK\r\n");
-            fixed_response.extend_from_slice(b"Content-Type: text/plain\r\n");
-            fixed_response.extend_from_slice(b"Content-Length: ");
-            fixed_response.extend_from_slice(response_buffer.len().to_string().as_bytes());
-            fixed_response.extend_from_slice(b"\r\n");
-            fixed_response.extend_from_slice(b"Connection: close\r\n");
-            fixed_response.extend_from_slice(b"\r\n");
-            fixed_response.extend_from_slice(&response_buffer);
-            
-            client_stream.write_all(&fixed_response).await?;
-            _total_bytes = fixed_response.len();
-        } else {
-            // 响应格式正确，直接转发
-            client_stream.write_all(&response_buffer).await?;
+        response_buffer.extend_from_slice(&buffer[..bytes_read]);
+        
+        match response_state.process_response_chunk(&response_buffer, &mut client_stream).await? {
+            ProcessingResult::Continue => continue,
+            ProcessingResult::Complete => break,
         }
     }
     
-    // 解析响应头
+    // 解析响应头和状态码用于日志记录
     let response_str = String::from_utf8_lossy(&response_buffer);
     let response_lines: Vec<&str> = response_str.lines().collect();
     let mut response_headers_map = HashMap::new();
-    let mut response_status = None;
-    let mut status_line = String::new();
+    let mut response_status = 0;
     
-    if let Some(status_line_str) = response_lines.first() {
-        status_line = status_line_str.to_string();
-        let status_parts: Vec<&str> = status_line_str.split_whitespace().collect();
+    if let Some(status_line) = response_lines.first() {
+        let status_parts: Vec<&str> = status_line.split_whitespace().collect();
         if status_parts.len() >= 2 {
-            response_status = status_parts.get(1).and_then(|s| s.parse().ok());
+            response_status = status_parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
         }
     }
-
-    // 查找响应头结束位置
+    
     let mut header_end = 0;
     if let Some(pos) = response_buffer.windows(4).position(|w| w == b"\r\n\r\n") {
         header_end = pos + 4;
@@ -761,43 +802,251 @@ async fn handle_http_request(
         }
     }
     
-    let response_body = if header_end > 0 && header_end < response_buffer.len() {
-        response_buffer[header_end..].to_vec()
-    } else {
-        Vec::new()
-    };
-    
-    let _status = status_line.split_whitespace().nth(1).unwrap_or("Unknown");
-    let duration_ms = start_time.elapsed().as_millis();
-    log_response_summary(_total_bytes, Some(_status));
-    log::info!("Forwarding response to client... Duration: {}ms", duration_ms);
-    log::info!("✅ HTTP REQUEST COMPLETE =====================================");
-
     // 使用新的DomainLogger记录完整的HTTP请求响应日志
-    let response_body_str = if !response_body.is_empty() {
-        String::from_utf8_lossy(&response_body).to_string()
+    let response_body_str = if header_end > 0 && header_end < response_buffer.len() {
+        String::from_utf8_lossy(&response_buffer[header_end..]).to_string()
     } else {
         String::new()
     };
+    let duration_ms = start_time.elapsed().as_millis();
     let log_entry = DomainLogger::create_log_entry(
         host.clone(),
         method.to_string(),
         format!("http://{host}:{port}{path}"),
         request_headers,
         response_headers_map,
-        response_status.unwrap_or(0),
+        response_status,
         request_body,
         response_body_str,
         url_params,
         duration_ms,
-        request_size, // 使用已计算的request_size
-        response_buffer.len(),  // 使用response_buffer.len()替代total_bytes
+        request_size,
+        response_buffer.len(),
         false,
         None,
     );
     logger.log_request(log_entry);
+    
+    log::info!("✅ HTTP REQUEST COMPLETE - {} bytes transferred - Duration: {}ms", response_buffer.len(), duration_ms);
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ProcessingResult {
+    Continue,
+    Complete,
+}
+
+#[derive(Debug)]
+struct ResponseState {
+    headers_read: bool,
+    content_length: Option<usize>,
+    transfer_encoding_chunked: bool,
+    connection_close: bool,
+}
+
+impl ResponseState {
+    fn new() -> Self {
+        Self {
+            headers_read: false,
+            content_length: None,
+            transfer_encoding_chunked: false,
+            connection_close: false,
+        }
+    }
+
+    async fn process_response_chunk(
+        &mut self,
+        response_buffer: &[u8],
+        client_stream: &mut TcpStream,
+    ) -> Result<ProcessingResult> {
+        if !self.headers_read {
+            return self.process_headers(response_buffer, client_stream).await;
+        }
+        
+        self.process_body(response_buffer, client_stream).await
+    }
+
+
+
+    async fn process_headers(
+        &mut self,
+        response_buffer: &[u8],
+        client_stream: &mut TcpStream,
+    ) -> Result<ProcessingResult> {
+        let Some(header_end) = response_buffer.windows(4).position(|w| w == b"\r\n\r\n") else {
+            return Ok(ProcessingResult::Continue);
+        };
+
+        let header_end = header_end + 4;
+        self.parse_headers(&response_buffer[..header_end])?;
+        
+        // 立即转发响应头
+        client_stream.write_all(&response_buffer[..header_end]).await?;
+        
+        if self.is_response_complete(&response_buffer[header_end..])? {
+            Ok(ProcessingResult::Complete)
+        } else {
+            Ok(ProcessingResult::Continue)
+        }
+    }
+
+
+
+    fn parse_headers(&mut self, header_data: &[u8]) -> Result<()> {
+        let headers_str = String::from_utf8_lossy(header_data);
+        let lines: Vec<&str> = headers_str.lines().collect();
+
+        for line in &lines[1..] {
+            if line.is_empty() {
+                break;
+            }
+            let Some(colon_pos) = line.find(':') else { continue };
+            
+            let key = line[..colon_pos].trim().to_lowercase();
+            let value = line[colon_pos + 1..].trim();
+            
+            match key.as_str() {
+                "content-length" => self.content_length = value.parse().ok(),
+                "transfer-encoding" => self.transfer_encoding_chunked = value.to_lowercase().contains("chunked"),
+                "connection" => self.connection_close = value.to_lowercase().contains("close"),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn is_response_complete(&self, body_data: &[u8]) -> Result<bool> {
+        Ok(match (self.transfer_encoding_chunked, self.content_length) {
+            (true, _) => is_chunked_complete(body_data),
+            (false, Some(length)) => body_data.len() >= length,
+            _ => false,
+        })
+    }
+
+    async fn process_body(
+        &mut self,
+        response_buffer: &[u8],
+        _client_stream: &mut TcpStream,
+    ) -> Result<ProcessingResult> {
+        self.determine_body_completion(response_buffer).await
+    }
+
+
+
+    async fn determine_body_completion(
+        &self,
+        response_buffer: &[u8],
+    ) -> Result<ProcessingResult> {
+        let body_start = response_buffer.windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|p| p + 4)
+            .unwrap_or(0);
+
+        match (self.transfer_encoding_chunked, self.content_length) {
+            (true, _) => {
+                let body = &response_buffer[body_start..];
+                if is_chunked_complete(body) {
+                    Ok(ProcessingResult::Complete)
+                } else {
+                    Ok(ProcessingResult::Continue)
+                }
+            }
+            (false, Some(length)) => {
+                let body_length = response_buffer.len().saturating_sub(body_start);
+                if body_length >= length {
+                    Ok(ProcessingResult::Complete)
+                } else {
+                    Ok(ProcessingResult::Continue)
+                }
+            }
+            _ => Ok(ProcessingResult::Continue),
+        }
+    }
+}
+
+
+
+fn parse_url_and_target(url: &str, lines: &[&str]) -> Result<(String, u16, String)> {
+    let url_info = UrlInfo::parse(url, lines)?;
+    Ok((url_info.host, url_info.port, url_info.path))
+}
+
+#[derive(Debug)]
+struct UrlInfo {
+    host: String,
+    port: u16,
+    path: String,
+}
+
+impl UrlInfo {
+    fn parse(url: &str, lines: &[&str]) -> Result<Self> {
+        let scheme = if url.starts_with("http://") {
+            "http"
+        } else if url.starts_with("https://") {
+            "https"
+        } else {
+            "relative"
+        };
+
+        match scheme {
+            "http" | "https" => Self::parse_absolute_url(url, scheme),
+            "relative" => Self::parse_relative_url(url, lines),
+            _ => unreachable!(),
+        }
+    }
+
+    fn parse_absolute_url(url: &str, scheme: &str) -> Result<Self> {
+        let url_parts: Vec<&str> = url.splitn(3, '/').collect();
+        let host_port = url_parts.get(2).unwrap_or(&"");
+        
+        let (host, port) = Self::parse_host_port(host_port, scheme)?;
+        let path = Self::build_path(&url_parts[2..]);
+        
+        Ok(UrlInfo { host, port, path })
+    }
+
+    fn parse_relative_url(url: &str, lines: &[&str]) -> Result<Self> {
+        let host_line = lines
+            .iter()
+            .find(|line| line.to_lowercase().starts_with("host:"))
+            .ok_or_else(|| anyhow::anyhow!("Missing Host header"))?;
+
+        let host_info = host_line[5..].trim();
+        let (host, port) = Self::parse_host_port(host_info, "http")?;
+        
+        Ok(UrlInfo {
+            host,
+            port,
+            path: url.to_string(),
+        })
+    }
+
+    fn parse_host_port(host_port: &str, scheme: &str) -> Result<(String, u16)> {
+        let parts: Vec<&str> = host_port.splitn(2, ':').collect();
+        let host = parts[0].to_string();
+        let default_port = match scheme {
+            "http" => 80,
+            "https" => 443,
+            _ => 80,
+        };
+        
+        let port = parts
+            .get(1)
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(default_port);
+            
+        Ok((host, port))
+    }
+
+    fn build_path(url_parts: &[&str]) -> String {
+        if url_parts.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}", url_parts.join("/"))
+        }
+    }
 }
 
 async fn tunnel_connection_with_logging(
