@@ -54,6 +54,15 @@ async fn main() -> Result<()> {
         if let Err(e) = cert_installer.install_certificate().await {
             log::warn!("Failed to install CA certificate: {}", e);
         }
+        
+        // 自动配置curl环境
+        if config.certificates.configure_curl {
+            if let Err(e) = cert_installer.configure_curl_environment(&config.proxy.host, config.proxy.port).await {
+                log::warn!("Failed to configure curl environment: {}", e);
+            } else {
+                log::info!("Curl environment configured successfully");
+            }
+        }
     }
     
     // 使用tokio::select!来同时监听信号和服务器运行
@@ -83,7 +92,18 @@ async fn main() -> Result<()> {
         }
     }
 
-    // 卸载系统信任存储中的证书
+    // 清理curl环境配置（当configure_curl为true时）
+    if config.certificates.configure_curl {
+        let cert_installer = CertInstaller::new(&config.certificates.ca_cert, &config.certificates.name);
+        log::info!("Cleaning up curl environment...");
+        if let Err(e) = cert_installer.cleanup_curl_environment().await {
+            log::warn!("Failed to cleanup curl environment: {}", e);
+        } else {
+            log::info!("Curl environment cleaned up successfully");
+        }
+    }
+    
+    // 卸载系统信任存储中的证书（当auto_uninstall为true时）
     if config.certificates.auto_uninstall {
         let cert_installer = CertInstaller::new(&config.certificates.ca_cert, &config.certificates.name);
         if let Err(e) = cert_installer.uninstall_certificate().await {

@@ -38,6 +38,9 @@ pub struct CertificatesConfig {
     /// 证书名称
     #[serde(default = "default_cert_name")]
     pub name: String,
+    /// 是否自动配置curl环境
+    #[serde(default = "default_configure_curl")]
+    pub configure_curl: bool,
 }
 
 /// 域名日志配置
@@ -78,6 +81,11 @@ fn default_auto_uninstall() -> bool {
 /// 默认证书名称
 fn default_cert_name() -> String {
     "study-proxy".to_string()
+}
+
+/// 默认自动配置curl环境设置
+fn default_configure_curl() -> bool {
+    true
 }
 
 /// 系统代理配置
@@ -236,7 +244,8 @@ mod tests {
                 "ca_key": "certs/ca.key",
                 "auto_install": true,
                 "auto_uninstall": true,
-                "name": "study-proxy"
+                "name": "study-proxy",
+                "configure_curl": true
             },
             "system_proxy": {
                 "enabled": true,
@@ -291,6 +300,7 @@ mod tests {
                 auto_install: true,
                 auto_uninstall: true,
                 name: "study-proxy".to_string(),
+                configure_curl: true,
             },
             system_proxy: SystemProxyConfig::default(),
             logging: LoggingConfig {
@@ -333,6 +343,7 @@ mod tests {
                 auto_install: true,
                 auto_uninstall: true,
                 name: "study-proxy".to_string(),
+                configure_curl: true,
             },
             system_proxy: SystemProxyConfig::default(),
             logging: LoggingConfig {
@@ -375,6 +386,7 @@ mod tests {
                 auto_install: true,
                 auto_uninstall: true,
                 name: "study-proxy".to_string(),
+                configure_curl: true,
             },
             system_proxy: SystemProxyConfig::default(),
             logging: LoggingConfig {

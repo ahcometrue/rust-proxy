@@ -15,63 +15,45 @@
 - **用途**: CA证书的私钥，用于签发站点证书
 - **重要**: 请妥善保管，不要泄露
 
-## 证书安装步骤
+## 自动配置功能
 
-### macOS系统
+程序现在内置了自动配置功能，无需手动执行bash脚本：
 
-1. **安装CA证书**:
-   ```bash
-   # 将证书添加到系统钥匙串
-   sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain certs/ca.crt
-   ```
+### 1. 证书自动安装
+启动程序时会自动将CA证书安装到系统信任存储：
+- **macOS**: 自动添加到系统钥匙串
+- **Linux**: 自动配置系统证书存储
+- **Windows**: 自动添加到受信任的根证书颁发机构
 
-2. **图形界面安装**:
-   - 双击 `certs/ca.crt` 文件
-   - 选择"系统"钥匙串
-   - 双击导入的证书，展开"信任"选项
-   - 将"使用此证书时"设置为"始终信任"
+### 2. curl环境自动配置
+程序会自动配置curl环境，无需手动设置：
+- 自动创建 `~/.curlrc` 文件，包含代理和CA证书配置
+- 自动设置环境变量：`HTTP_PROXY`、`HTTPS_PROXY`、`CURL_CA_BUNDLE`
+- 自动配置shell环境（.zshrc/.bashrc）
 
-### Windows系统
-
-1. **安装CA证书**:
-   - 双击 `certs/ca.crt` 文件
-   - 选择"安装证书"
-   - 存储位置选择"本地计算机"
-   - 证书存储选择"受信任的根证书颁发机构"
-
-### Linux系统
-
-1. **Ubuntu/Debian**:
-   ```bash
-   sudo cp certs/ca.crt /usr/local/share/ca-certificates/study-proxy.crt
-   sudo update-ca-certificates
-   ```
-
-2. **CentOS/RHEL**:
-   ```bash
-   sudo cp certs/ca.crt /etc/pki/ca-trust/source/anchors/study-proxy.crt
-   sudo update-ca-trust
-   ```
-
-## 使用代理
+## 使用方法
 
 ### 1. 启动代理
 ```bash
 cargo run -- --config config.json
 ```
 
-### 2. 配置系统代理
-- **HTTP代理**: `127.0.0.1:8888`
-- **HTTPS代理**: `127.0.0.1:8888`
+### 2. 自动配置完成
+启动后，程序会自动：
+- 生成证书文件
+- 安装证书到系统信任存储
+- 配置curl环境
+- 设置系统代理（如果启用）
 
-### 3. 浏览器配置
-在浏览器中设置代理：
-- **Chrome**: 设置 → 系统 → 打开代理设置
-- **Firefox**: 设置 → 网络设置 → 手动代理配置
+### 3. 验证配置
+测试curl命令，无需任何额外参数：
+```bash
+curl https://api.github.com
+```
 
 ## 配置文件说明
 
-编辑 `config.json` 来自定义代理行为：
+编辑 `config.json` 来自定义行为：
 
 ```json
 {
@@ -85,12 +67,28 @@ cargo run -- --config config.json
   },
   "certificates": {
     "ca_cert": "certs/ca.crt",
-    "ca_key": "certs/ca.key"
+    "ca_key": "certs/ca.key",
+    "auto_install": true,
+    "auto_uninstall": false,
+    "name": "rustProxyCA",
+    "configure_curl": true
+  },
+  "system_proxy": {
+    "enabled": true,
+    "auto_configure": true
   }
 }
 ```
 
-## 验证证书
+### 配置选项说明
+
+- **certificates.auto_install**: 是否自动安装证书到系统信任存储
+- **certificates.auto_uninstall**: 程序关闭时是否自动卸载证书
+- **certificates.configure_curl**: 是否自动配置curl环境
+- **system_proxy.enabled**: 是否启用系统代理
+- **system_proxy.auto_configure**: 是否自动配置系统代理设置
+
+## 手动验证
 
 ### 1. 检查证书信息
 ```bash
@@ -99,13 +97,44 @@ openssl x509 -in certs/ca.crt -text -noout
 
 ### 2. 测试HTTPS连接
 ```bash
-curl --proxy 127.0.0.1:8888 https://api.github.com
+# 无需额外参数，curl会自动使用配置
+curl https://api.github.com
+
+# 检查代理是否工作
+curl -v https://httpbin.org/ip
+```
+
+### 3. 检查curl配置
+```bash
+# 查看curl使用的配置文件
+echo $CURL_CA_BUNDLE
+
+# 查看环境变量
+echo $HTTP_PROXY
+echo $HTTPS_PROXY
+```
+
+## 清理配置
+
+程序关闭时会自动清理：
+- 移除curl环境配置
+- 清理shell环境变量（如果auto_uninstall为true）
+- 卸载系统证书（如果auto_uninstall为true）
+
+### 手动清理
+如果需要手动清理：
+```bash
+# 删除curl配置文件
+rm ~/.curlrc
+
+# 从shell配置文件中移除相关配置
+# 编辑 ~/.zshrc 或 ~/.bashrc，删除study-proxy相关行
 ```
 
 ## 常见问题
 
 ### 1. 证书无效警告
-- 确保已正确安装CA证书到系统信任存储
+- 确保程序已正确启动并完成自动配置
 - 重启浏览器或系统
 - 检查证书是否过期
 
@@ -119,9 +148,27 @@ curl --proxy 127.0.0.1:8888 https://api.github.com
 - 检查文件权限
 - 确保磁盘空间充足
 
+## 平台特定说明
+
+### macOS
+- 证书会自动添加到系统钥匙串
+- 需要管理员权限进行系统证书安装
+- 支持zsh和bash shell配置
+
+### Linux
+- 支持Ubuntu/Debian的`update-ca-certificates`
+- 支持CentOS/RHEL的`update-ca-trust`
+- 支持bash和zsh shell配置
+
+### Windows
+- 证书会自动添加到受信任的根证书颁发机构
+- 需要管理员权限
+- 支持PowerShell和CMD环境
+
 ## 安全提醒
 
 1. **仅限开发测试使用**，不要在生产环境中使用
 2. **不要分享** CA私钥文件
 3. **定期更新**证书文件
 4. **使用后清理**证书，避免长期信任风险
+5. 程序关闭时会自动清理curl环境配置

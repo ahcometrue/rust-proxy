@@ -280,6 +280,7 @@ mod tests {
                 auto_install: true,
                 auto_uninstall: true,
                 name: "study-proxy".to_string(),
+                configure_curl: true,
             },
             system_proxy: crate::config::SystemProxyConfig {
                 enabled: true,

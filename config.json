@@ -21,7 +21,8 @@
     "ca_key": "certs/ca.key",
     "auto_install": true,
     "auto_uninstall": false,
-    "name": "rustProxyCA"
+    "name": "rustProxyCA",
+    "configure_curl": true
   },
   "logging": {
     "level": "debug",
