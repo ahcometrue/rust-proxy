@@ -2,14 +2,16 @@ pub mod config;
 pub mod cert;
 pub mod domain_logger;
 pub mod system_proxy;
-pub mod cert_installer;
+pub mod cert_manager;
+pub mod curl_manager;
 
 // 公共导出
 pub use config::Config;
 pub use cert::CertManager;
 pub use domain_logger::{DomainLogger, LogEntry};
 pub use system_proxy::{SystemProxyManager, ProxyConfig};
-pub use cert_installer::CertInstaller;
+pub use cert_manager::CertManager as CertEnvManager;
+pub use curl_manager::CurlManager;
 
 #[cfg(test)]
 mod tests {

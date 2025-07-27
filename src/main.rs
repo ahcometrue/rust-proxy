@@ -3,12 +3,14 @@ mod cert;
 mod proxy;
 mod domain_logger;
 mod system_proxy;
-mod cert_installer;
+mod cert_manager;
+mod curl_manager;
 
 use anyhow::Result;
 use clap::Parser;
 use system_proxy::{SystemProxyManager, ProxyConfig};
-use cert_installer::CertInstaller;
+use cert_manager::CertManager as CertEnvManager;
+use curl_manager::CurlManager;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -50,14 +52,15 @@ async fn main() -> Result<()> {
     
     // 自动安装证书到系统信任存储（确保证书已生成）
     if config.certificates.auto_install {
-        let cert_installer = CertInstaller::new(&config.certificates.ca_cert, &config.certificates.name);
-        if let Err(e) = cert_installer.install_certificate().await {
+        let cert_manager = CertEnvManager::new(&config.certificates.ca_cert, &config.certificates.name);
+        if let Err(e) = cert_manager.install_ca_certificate().await {
             log::warn!("Failed to install CA certificate: {}", e);
         }
         
         // 自动配置curl环境
         if config.certificates.configure_curl {
-            if let Err(e) = cert_installer.configure_curl_environment(&config.proxy.host, config.proxy.port).await {
+            let curl_manager = CurlManager::new(&config.certificates.ca_cert);
+            if let Err(e) = curl_manager.configure_curl_environment(&config.proxy.host, config.proxy.port).await {
                 log::warn!("Failed to configure curl environment: {}", e);
             } else {
                 log::info!("Curl environment configured successfully");
@@ -94,9 +97,9 @@ async fn main() -> Result<()> {
 
     // 清理curl环境配置（当configure_curl为true时）
     if config.certificates.configure_curl {
-        let cert_installer = CertInstaller::new(&config.certificates.ca_cert, &config.certificates.name);
+        let curl_manager = CurlManager::new(&config.certificates.ca_cert);
         log::info!("Cleaning up curl environment...");
-        if let Err(e) = cert_installer.cleanup_curl_environment().await {
+        if let Err(e) = curl_manager.cleanup_curl_environment().await {
             log::warn!("Failed to cleanup curl environment: {}", e);
         } else {
             log::info!("Curl environment cleaned up successfully");
@@ -105,8 +108,8 @@ async fn main() -> Result<()> {
     
     // 卸载系统信任存储中的证书（当auto_uninstall为true时）
     if config.certificates.auto_uninstall {
-        let cert_installer = CertInstaller::new(&config.certificates.ca_cert, &config.certificates.name);
-        if let Err(e) = cert_installer.uninstall_certificate().await {
+        let cert_manager = CertEnvManager::new(&config.certificates.ca_cert, &config.certificates.name);
+        if let Err(e) = cert_manager.uninstall_ca_certificate().await {
             log::warn!("Failed to uninstall CA certificate: {}", e);
         }
     }
