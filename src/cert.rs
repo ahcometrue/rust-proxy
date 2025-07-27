@@ -11,6 +11,8 @@ use std::path::Path;
 pub struct CertManager {
     /// CA私钥
     ca_key: PrivateKey,
+    /// CA证书名称
+    cert_name: String,
 }
 
 impl CertManager {
@@ -22,12 +24,12 @@ impl CertManager {
     /// 
     /// # 返回值
     /// 返回Result包装的CertManager实例，如果过程中出现错误则返回错误信息
-    pub fn new(ca_cert_path: &str, ca_key_path: &str) -> Result<Self> {
+    pub fn new(ca_cert_path: &str, ca_key_path: &str, cert_name: &str) -> Result<Self> {
         let ca_cert_path = Path::new(ca_cert_path);
         let ca_key_path = Path::new(ca_key_path);
         
         // 尝试加载已存在的证书和私钥
-        match Self::load_existing_certificates(ca_cert_path, ca_key_path) {
+        match Self::load_existing_certificates(ca_cert_path, ca_key_path, cert_name) {
             Some(cert_manager) => {
                 log::info!("Successfully loaded existing CA certificate and key");
                 Ok(cert_manager)
@@ -35,13 +37,13 @@ impl CertManager {
             None => {
                 // 生成新的CA证书和私钥
                 log::info!("Generating new CA certificate...");
-                let (ca_cert, ca_key) = Self::generate_ca_cert()?;
+                let (ca_cert, ca_key) = Self::generate_ca_cert(cert_name)?;
                 
                 // 保存证书和私钥到文件
                 Self::save_certificates(ca_cert_path, ca_key_path, &ca_cert, &ca_key)?;
                 log::info!("Saved new CA certificate and key to files");
                 
-                Ok(Self { ca_key })
+                Ok(Self { ca_key, cert_name: cert_name.to_string() })
             }
         }
     }
@@ -58,6 +60,7 @@ impl CertManager {
     fn load_existing_certificates(
         ca_cert_path: &Path,
         ca_key_path: &Path,
+        cert_name: &str,
     ) -> Option<Self> {
         // 检查证书和私钥文件是否都存在
         if !(ca_cert_path.exists() && ca_key_path.exists()) {
@@ -78,7 +81,7 @@ impl CertManager {
         match (certs.first(), keys.first()) {
             (Some(_cert_data), Some(key_data)) => {
                 let ca_key = PrivateKey(key_data.clone());
-                Some(Self { ca_key })
+                Some(Self { ca_key, cert_name: cert_name.to_string() })
             },
             _ => {
                 log::warn!("Failed to load existing certificate or key data");
@@ -125,14 +128,17 @@ impl CertManager {
 
     /// 生成CA证书和私钥
     /// 
+    /// # 参数
+    /// * `cert_name` - CA证书名称
+    /// 
     /// # 返回值
     /// 返回Result包装的(Certificate, PrivateKey)元组，如果过程中出现错误则返回错误信息
-    fn generate_ca_cert() -> Result<(Certificate, PrivateKey)> {
+    fn generate_ca_cert(cert_name: &str) -> Result<(Certificate, PrivateKey)> {
         use rcgen::*;
         
         let mut params = CertificateParams::default();
         let mut dn = DistinguishedName::new();
-        dn.push(DnType::CommonName, "Study Proxy CA");
+        dn.push(DnType::CommonName, cert_name);
         params.distinguished_name = dn;
         
         params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -216,7 +222,7 @@ impl CertManager {
         // 创建一个临时的CertificateParams来重建CA证书
         let mut params = CertificateParams::default();
         let mut dn = DistinguishedName::new();
-        dn.push(DnType::CommonName, "Study Proxy CA");
+        dn.push(DnType::CommonName, &self.cert_name);
         params.distinguished_name = dn;
         
         params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -246,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_generate_ca_cert() {
-        let result = CertManager::generate_ca_cert();
+        let result = CertManager::generate_ca_cert("study-proxy");
         assert!(result.is_ok());
         
         let (cert, key) = result.unwrap();
@@ -265,7 +271,7 @@ mod tests {
         let ca_key_str = ca_key_path.to_str().unwrap();
         
         // 第一次创建 CertManager（生成新证书）
-        let cert_manager = CertManager::new(ca_cert_str, ca_key_str);
+        let cert_manager = CertManager::new(ca_cert_str, ca_key_str, "study-proxy");
         assert!(cert_manager.is_ok());
         
         // 验证证书文件已创建
@@ -273,17 +279,17 @@ mod tests {
         assert!(ca_key_path.exists());
         
         // 第二次创建 CertManager（从文件加载）
-        let cert_manager2 = CertManager::new(ca_cert_str, ca_key_str);
+        let cert_manager2 = CertManager::new(ca_cert_str, ca_key_str, "study-proxy");
         assert!(cert_manager2.is_ok());
     }
 
     #[test]
     fn test_generate_site_cert() {
-        let result = CertManager::generate_ca_cert();
+        let result = CertManager::generate_ca_cert("study-proxy");
         assert!(result.is_ok());
         
         let (_, ca_key) = result.unwrap();
-        let cert_manager = CertManager { ca_key };
+        let cert_manager = CertManager { ca_key, cert_name: "study-proxy".to_string() };
         
         let site_cert_result = cert_manager.generate_site_cert("example.com");
         assert!(site_cert_result.is_ok());
@@ -307,7 +313,7 @@ mod tests {
         let ca_key_path = temp_dir.path().join("ca.key");
         
         // 生成测试证书
-        let (ca_cert, ca_key) = CertManager::generate_ca_cert().unwrap();
+        let (ca_cert, ca_key) = CertManager::generate_ca_cert("study-proxy").unwrap();
         
         // 保存证书
         let save_result = CertManager::save_certificates(

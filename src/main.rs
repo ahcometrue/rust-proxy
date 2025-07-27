@@ -3,10 +3,12 @@ mod cert;
 mod proxy;
 mod domain_logger;
 mod system_proxy;
+mod cert_installer;
 
 use anyhow::Result;
 use clap::Parser;
 use system_proxy::{SystemProxyManager, ProxyConfig};
+use cert_installer::CertInstaller;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -41,9 +43,18 @@ async fn main() -> Result<()> {
             log::info!("System proxy configured successfully");
         }
     }
-    
+
+    // 先创建代理服务器（会生成证书）
     log::info!("Starting proxy server...");
     let server = proxy::ProxyServer::new(config.clone())?;
+    
+    // 自动安装证书到系统信任存储（确保证书已生成）
+    if config.certificates.auto_install {
+        let cert_installer = CertInstaller::new(&config.certificates.ca_cert, &config.certificates.name);
+        if let Err(e) = cert_installer.install_certificate().await {
+            log::warn!("Failed to install CA certificate: {}", e);
+        }
+    }
     
     // 使用tokio::select!来同时监听信号和服务器运行
     tokio::select! {
@@ -69,6 +80,14 @@ async fn main() -> Result<()> {
             log::warn!("Failed to unset system proxy: {}", e);
         } else {
             log::info!("System proxy settings restored");
+        }
+    }
+
+    // 卸载系统信任存储中的证书
+    if config.certificates.auto_uninstall {
+        let cert_installer = CertInstaller::new(&config.certificates.ca_cert, &config.certificates.name);
+        if let Err(e) = cert_installer.uninstall_certificate().await {
+            log::warn!("Failed to uninstall CA certificate: {}", e);
         }
     }
     

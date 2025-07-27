@@ -277,6 +277,13 @@ mod tests {
             certificates: crate::config::CertificatesConfig {
                 ca_cert: "certs/ca.crt".to_string(),
                 ca_key: "certs/ca.key".to_string(),
+                auto_install: true,
+                auto_uninstall: true,
+                name: "study-proxy".to_string(),
+            },
+            system_proxy: crate::config::SystemProxyConfig {
+                enabled: true,
+                auto_configure: true,
             },
             logging: crate::config::LoggingConfig {
                 level: "debug".to_string(),

@@ -36,6 +36,7 @@ impl ProxyServer {
         let cert_manager = CertManager::new(
             &config.certificates.ca_cert,
             &config.certificates.ca_key,
+            &config.certificates.name,
         )?;
 
         let logger = DomainLogger::new(Arc::new(config.clone()));

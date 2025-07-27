@@ -29,6 +29,15 @@ pub struct CertificatesConfig {
     pub ca_cert: String,
     /// CA私钥文件路径
     pub ca_key: String,
+    /// 是否自动安装证书到系统信任存储
+    #[serde(default = "default_auto_install")]
+    pub auto_install: bool,
+    /// 程序关闭时是否自动卸载证书
+    #[serde(default = "default_auto_uninstall")]
+    pub auto_uninstall: bool,
+    /// 证书名称
+    #[serde(default = "default_cert_name")]
+    pub name: String,
 }
 
 /// 域名日志配置
@@ -54,6 +63,21 @@ fn default_request_body_limit() -> i64 {
 /// 默认响应体大小限制
 fn default_response_body_limit() -> i64 {
     1024
+}
+
+/// 默认自动安装证书设置
+fn default_auto_install() -> bool {
+    true
+}
+
+/// 默认自动卸载证书设置
+fn default_auto_uninstall() -> bool {
+    true
+}
+
+/// 默认证书名称
+fn default_cert_name() -> String {
+    "study-proxy".to_string()
 }
 
 /// 系统代理配置
@@ -209,7 +233,10 @@ mod tests {
             },
             "certificates": {
                 "ca_cert": "certs/ca.crt",
-                "ca_key": "certs/ca.key"
+                "ca_key": "certs/ca.key",
+                "auto_install": true,
+                "auto_uninstall": true,
+                "name": "study-proxy"
             },
             "system_proxy": {
                 "enabled": true,
@@ -261,6 +288,9 @@ mod tests {
             certificates: CertificatesConfig {
                 ca_cert: "certs/ca.crt".to_string(),
                 ca_key: "certs/ca.key".to_string(),
+                auto_install: true,
+                auto_uninstall: true,
+                name: "study-proxy".to_string(),
             },
             system_proxy: SystemProxyConfig::default(),
             logging: LoggingConfig {
@@ -300,7 +330,11 @@ mod tests {
             certificates: CertificatesConfig {
                 ca_cert: "certs/ca.crt".to_string(),
                 ca_key: "certs/ca.key".to_string(),
+                auto_install: true,
+                auto_uninstall: true,
+                name: "study-proxy".to_string(),
             },
+            system_proxy: SystemProxyConfig::default(),
             logging: LoggingConfig {
                 level: "debug".to_string(),
                 output: "file".to_string(),
@@ -338,7 +372,11 @@ mod tests {
             certificates: CertificatesConfig {
                 ca_cert: "certs/ca.crt".to_string(),
                 ca_key: "certs/ca.key".to_string(),
+                auto_install: true,
+                auto_uninstall: true,
+                name: "study-proxy".to_string(),
             },
+            system_proxy: SystemProxyConfig::default(),
             logging: LoggingConfig {
                 level: "debug".to_string(),
                 output: "file".to_string(),

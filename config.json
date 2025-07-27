@@ -18,7 +18,10 @@
   },
   "certificates": {
     "ca_cert": "certs/ca.crt",
-    "ca_key": "certs/ca.key"
+    "ca_key": "certs/ca.key",
+    "auto_install": true,
+    "auto_uninstall": false,
+    "name": "rustProxyCA"
   },
   "logging": {
     "level": "debug",
