@@ -93,15 +93,12 @@ fn default_configure_curl() -> bool {
 pub struct SystemProxyConfig {
     /// 是否启用系统代理
     pub enabled: bool,
-    /// 是否自动配置系统代理
-    pub auto_configure: bool,
 }
 
 impl Default for SystemProxyConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
-            auto_configure: true,
+            enabled: true
         }
     }
 }
@@ -248,8 +245,7 @@ mod tests {
                 "configure_curl": true
             },
             "system_proxy": {
-                "enabled": true,
-                "auto_configure": true
+                "enabled": true
             },
             "logging": {
                 "level": "debug",
@@ -271,7 +267,6 @@ mod tests {
         assert_eq!(config.proxy.host, "127.0.0.1");
         assert_eq!(config.proxy.port, 8888);
         assert_eq!(config.system_proxy.enabled, true);
-        assert_eq!(config.system_proxy.auto_configure, true);
         assert_eq!(config.target.domains, vec!["example.com"]);
         assert_eq!(config.target.ports, vec![80, 443]);
         assert_eq!(config.certificates.ca_cert, "certs/ca.crt");

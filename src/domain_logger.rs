@@ -283,8 +283,7 @@ mod tests {
                 configure_curl: true,
             },
             system_proxy: crate::config::SystemProxyConfig {
-                enabled: true,
-                auto_configure: true,
+                enabled: true
             },
             logging: crate::config::LoggingConfig {
                 level: "debug".to_string(),

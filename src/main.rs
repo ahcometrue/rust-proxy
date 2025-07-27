@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     let proxy_manager = SystemProxyManager::new()?;
     
     // 设置系统代理
-    if config.system_proxy.enabled && config.system_proxy.auto_configure {
+    if config.system_proxy.enabled {
         let proxy_config = ProxyConfig {
             host: config.proxy.host.clone(),
             port: config.proxy.port,
@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
     }
     
     // 清理系统代理
-    if config.system_proxy.enabled && config.system_proxy.auto_configure {
+    if config.system_proxy.enabled {
         log::info!("Cleaning up system proxy settings...");
         if let Err(e) = proxy_manager.unset_proxy().await {
             log::warn!("Failed to unset system proxy: {}", e);

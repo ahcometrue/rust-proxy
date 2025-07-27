@@ -21,8 +21,7 @@
     "port": 8888
   },
   "system_proxy": {
-    "enabled": true,
-    "auto_configure": true
+    "enabled": true
   }
 }
 ```
@@ -30,7 +29,6 @@
 ### 配置选项
 
 - `enabled`: 是否启用系统代理功能（默认：true）
-- `auto_configure`: 是否自动配置系统代理（默认：true）
 
 ## 平台支持详情
 
@@ -56,8 +54,7 @@
 ```json
 {
   "system_proxy": {
-    "enabled": true,
-    "auto_configure": true
+    "enabled": true
   }
 }
 ```
@@ -66,8 +63,7 @@
 ```json
 {
   "system_proxy": {
-    "enabled": false,
-    "auto_configure": false
+    "enabled": false
   }
 }
 ```

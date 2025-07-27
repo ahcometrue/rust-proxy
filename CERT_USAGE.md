@@ -74,8 +74,7 @@ curl https://api.github.com
     "configure_curl": true
   },
   "system_proxy": {
-    "enabled": true,
-    "auto_configure": true
+    "enabled": true
   }
 }
 ```
@@ -86,7 +85,6 @@ curl https://api.github.com
 - **certificates.auto_uninstall**: 程序关闭时是否自动卸载证书
 - **certificates.configure_curl**: 是否自动配置curl环境
 - **system_proxy.enabled**: 是否启用系统代理
-- **system_proxy.auto_configure**: 是否自动配置系统代理设置
 
 ## 手动验证
 
