@@ -1,6 +1,11 @@
 mod config;
 mod cert;
-mod proxy;
+mod proxy {
+    pub mod proxy_server;
+    pub mod handler;
+    pub mod response;
+    pub mod request;
+}
 mod domain_logger;
 mod system_proxy;
 mod cert_manager;
@@ -8,9 +13,11 @@ mod curl_manager;
 
 use anyhow::Result;
 use clap::Parser;
+use std::sync::Arc;
 use system_proxy::{SystemProxyManager, ProxyConfig};
 use cert_manager::CertManager as CertEnvManager;
 use curl_manager::CurlManager;
+use proxy::proxy_server::ProxyServer;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -46,9 +53,23 @@ async fn main() -> Result<()> {
         }
     }
 
+    // 创建证书管理器
+    let cert_manager = Arc::new(cert::CertManager::new(
+        &config.certificates.ca_cert,
+        &config.certificates.ca_key,
+        &config.certificates.name,
+    )?);
+    
+    // 创建日志记录器
+    let logger = domain_logger::DomainLogger::new(Arc::new(config.clone()));
+    
     // 先创建代理服务器（会生成证书）
     log::info!("Starting proxy server...");
-    let server = proxy::ProxyServer::new(config.clone())?;
+    let server = ProxyServer::new(
+        Arc::new(config.clone()),
+        Arc::clone(&cert_manager),
+        Arc::clone(&logger),
+    );
     
     // 自动安装证书到系统信任存储（确保证书已生成）
     if config.certificates.auto_install {
