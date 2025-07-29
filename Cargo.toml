@@ -20,6 +20,7 @@ chrono = "0.4"
 bytes = "1.0"
 pem = "3.0"
 rustls = "0.21"
+flate2 = "1.0"
 
 [dev-dependencies]
 tempfile = "3.0"
