@@ -248,8 +248,10 @@ impl HttpResponseProcessor {
         self.process_compressed_data(data)?;
         
         if let Some(content_length) = self.content_length {
-            // 有Content-Length的情况
-            let remaining = content_length.saturating_sub(self.forwarded_bytes);
+            // 有Content-Length的情况 - 只计算响应体的长度
+            let body_start = self.header_end.unwrap_or(0);
+            let current_body_bytes = self.forwarded_bytes.saturating_sub(body_start);
+            let remaining = content_length.saturating_sub(current_body_bytes);
             let to_forward = std::cmp::min(remaining, data.len());
             
             if to_forward > 0 {
@@ -257,7 +259,7 @@ impl HttpResponseProcessor {
                 self.forwarded_bytes += to_forward;
             }
             
-            if self.forwarded_bytes >= content_length {
+            if current_body_bytes + data.len() >= content_length {
                 Ok(ProcessingResult::Complete)
             } else {
                 Ok(ProcessingResult::Continue)
@@ -285,8 +287,10 @@ impl HttpResponseProcessor {
         self.process_compressed_data(data)?;
         
         if let Some(content_length) = self.content_length {
-            // 有Content-Length的情况
-            let remaining = content_length.saturating_sub(self.forwarded_bytes);
+            // 有Content-Length的情况 - 只计算响应体的长度
+            let body_start = self.header_end.unwrap_or(0);
+            let current_body_bytes = self.forwarded_bytes.saturating_sub(body_start);
+            let remaining = content_length.saturating_sub(current_body_bytes);
             let to_forward = std::cmp::min(remaining, data.len());
             
             if to_forward > 0 {
@@ -294,7 +298,7 @@ impl HttpResponseProcessor {
                 self.forwarded_bytes += to_forward;
             }
             
-            if self.forwarded_bytes >= content_length {
+            if current_body_bytes + data.len() >= content_length {
                 Ok(ProcessingResult::Complete)
             } else {
                 Ok(ProcessingResult::Continue)
